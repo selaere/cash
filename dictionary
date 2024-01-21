@@ -1,0 +1,83 @@
+! not
+" show
+# length
+$ call
+% mod
+& and
+' drop
+* mul
++ add
+, swap
+- sub
+. dup
+/ divide
+: over
+; rot
+< less
+= eq
+> great
+? equals
+@ swap nth
+\ r@
+^ cons
+_ label/in var
+` cat
+{ >r
+| or
+} r>
+~ neg
+
+A append file
+B break array
+C copy file
+D dir file
+E enlist array
+F folder file
+G greater number
+H head array
+I iota array
+J join array
+K kernel array
+L lesser number
+M move file
+N nudge array
+O reorganize array
+P power number
+Q query array
+R read file
+S sort array
+T tail array
+U unlink file
+V reverse array
+W write file
+X exclude array
+Y yank array
+Z round number?
+
+
+a( and
+b( both?
+c( cells // case? cond?
+d( dip
+e( each
+f( fold
+g( group (bicells? stencil?)
+h( heads (scan)?
+i( if
+j( (ifelse?)
+k( keep
+l( list
+m( map
+n( if no
+o( or
+p( product outer / fixed point
+q( query
+r( reduce
+s( scan? shaped (rank)?
+t( times
+u( until
+v( 
+w( while
+x( exclude (filter)
+y( if yes
+z( zip
