@@ -12,7 +12,7 @@ import Data.Functor ((<&>))
 import Data.Bifunctor (first)
 import Data.List (singleton)
 import Prim (exec)
-import Control.Lens ((%=), Traversal', use, At (at), (.=))
+import Control.Lens ((%=), Traversal', use, at, (.=))
 import Data.Maybe (fromMaybe)
 
 data RtState = RtState { stacks :: HM.HashMap Ident [Val]
@@ -74,15 +74,10 @@ instance Error RtErr where
   showErr x = Output (T.pack (show x))
   errAsVal = undefined
 
---meow :: [Obj] -> [Val] -> RtM [Val]
---meow [] stk = pure stk
-
-
-
 placeholderActsToVal :: [Act] -> Val
 placeholderActsToVal = Quot . (>>= conv)
   where conv :: Act -> [Elem]
-        conv (Comb c a) = (EBox . placeholderActsToVal <$> a) <> [ECmd (Comb c [])]
+        conv (Comb c a) = (asElem . placeholderActsToVal <$> a) <> [ECmd (Comb c [])]
         conv (CombUnf c a) = conv (Comb c a) -- trolled
         conv (Const a) = [asElem a]
         conv a = [ECmd a]
@@ -127,8 +122,8 @@ cutAct defs (Cmd ident : os) =
   case HM.lookup ident defs of
     Just (Def call arity) -> readQuotN defs ([], os) arity <&> first (Comb call)
     Nothing               -> Left (CmdNotFound ident)
-cutAct _efs (Numlit i : os)   = Right (Const (Atom (ENum (toRational i))), os)
-cutAct _efs (LitLabel l : os) = Right (Const (Atom (ESymbol l)), os)
+cutAct _efs (Numlit i : os)   = Right (Const (Nums (Atom (toRational i))), os)
+cutAct _efs (LitLabel l : os) = Right (Const (Symbols (Atom (Val.Symbol l))), os)
 cutAct defs (QuotF a : os) = (,os) . Const . placeholderActsToVal <$> readQuot defs a
 cutAct defs (QuotUnf a : os) = cutAct defs (QuotF a : os)
 cutAct _efs (Literal i t : os) | T.null i = Right (Const (list (EChar <$> T.unpack t)), os)

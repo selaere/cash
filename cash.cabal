@@ -71,6 +71,8 @@ executable cash
         ViewPatterns,
         PatternSynonyms,
         FunctionalDependencies,
+        TypeFamilies,
+        --OverloadedLists,
 
     -- Other library packages from which modules are imported.
     build-depends:

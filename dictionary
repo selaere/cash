@@ -1,10 +1,10 @@
 ! not
-" show
+" show       "
 # length
 $ call
 % mod
 & and
-' drop
+' drop       '
 * mul
 + add
 , swap
@@ -81,3 +81,32 @@ w( while
 x( exclude (filter)
 y( if yes
 z( zip
+
+
+
+
+
+
+a[ regex all matches
+b[ regex split
+c[ csv
+e[ escaped
+g[ grep
+f[ find file
+i[ ini
+j[ json
+l[ lines
+n[ numbers
+m[ regex fullmatch
+o[ regex literal
+p[ path literal
+q[ regex index of first match
+r[ regex replace
+s[ regex search
+w[ whitespace trimmed
+x[ xml
+.[ argument parse
+ [ bytes
+ [ char
+ [ shell, bash
+ [ run command

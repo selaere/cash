@@ -1,9 +1,8 @@
 module Prim where
 
-import Val (Val(..), CashMonad(..), Output(..), Error(..), Elem (..), Fun(..))
-import Arr (scalar, biscalar, catenate, construct, asAxes, reshape)
+import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..))
+import Arr (scalar, biscalar, catenate, construct, asAxes, reshape, agree)
 import qualified Data.Text as T
-import Control.Monad ((>=>))
 import Data.Functor (($>))
 
 
@@ -29,23 +28,12 @@ instance Error PrimError where
 fromMaybeErr :: CashMonad m => Error e => e -> Maybe a -> m a
 fromMaybeErr err = maybe (cashError err) pure
 
-number :: Elem -> Maybe Rational
-number (ENum x)  = Just x
-number (EChar c) = Just (toRational (fromEnum c))
-number _         = Nothing
-
-numberCash :: CashMonad m => Elem -> m Rational
-numberCash = fromMaybeErr NotNumber . number
 
 monum :: CashMonad m => (Rational -> m Rational) -> Val -> m Val
-monum f = scalar (numberCash >=> fmap ENum . f)
+monum f = scalar (mathRat f)
 
 binum :: CashMonad m => (Rational -> Rational -> m Rational) -> Val -> Val -> m Val
-binum f =
-  biscalar (cashError MismatchingAxes) \a b -> do
-    a' <- numberCash a
-    b' <- numberCash b
-    ENum <$> f a' b'
+binum f = biscalar (cashError MismatchingAxes) (agree (mathRat2 f))
 
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)

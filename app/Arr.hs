@@ -1,42 +1,39 @@
 module Arr where
 
-import qualified Data.Vector as V
-import qualified Data.Vector.Mutable as VM
+import qualified Data.Vector.Generic as V
+import qualified Data.Vector as VB
+import qualified Data.Vector.Generic.Mutable as VM
 import qualified Data.HashMap.Strict as HM
-import Data.Bifunctor (bimap)
-import Data.List.Split (chunksOf)
 import Control.Exception (assert)
 import Data.Function (on)
 import Control.Monad (guard, zipWithM)
 import Data.Functor (($>), (<&>))
-import Val (Val(..), Axis(..), pattern Names, Elem(EBox, ENum, EChar), Bivector(..))
+import Val (pattern Names, Val(..), Axis(..), Elem(..), Bivector(..), Arr(..), L(..), Vec)
 import Data.Maybe (fromMaybe)
-import Data.Ratio (numerator, denominator)
+import Data.Coerce (coerce)
+import Data.Functor.Compose (Compose(..))
+import Data.Functor.Identity (Identity(..))
 
 
 infixr 8 .:
 (.:) :: (c->d) -> (a->b->c) -> a->b->d
 (f .: g) x y = f (g x y)
 
-onlyArr :: Val -> Val
-onlyArr a@(Arr _ _) = a
-onlyArr (Quot elems) = list elems
 
--- for when i dont want to bother to handle the Quot case
-pattern Arr' :: [Axis] -> V.Vector Elem -> Val
-pattern Arr' sh a <- (onlyArr -> Arr sh a)
-{-# COMPLETE Arr' #-}
-
-
-pattern Atom :: Elem -> Val
+pattern Atom :: L a => a -> Arr a
 pattern Atom a <- Arr [] (V.head -> a) where Atom a = Arr [] (V.singleton a)
 
 list :: [Elem] -> Val
-list (V.fromList -> elems) = Arr [Ixd (V.length elems)] elems
+list = atoval . listl
+
+listl :: L a => [a] -> Arr a
+listl (V.fromList -> elems) = Arr [Ixd (V.length elems)] elems
+
+shapel :: Arr a -> [Axis]
+shapel (Arr sh _) = sh
 
 shape :: Val -> [Axis]
-shape (Arr sh _) = sh
-shape (Quot elems) = [Ixd (length elems)]
+shape = tap shapel
 
 axisLength :: Axis -> Int
 axisLength (Ixd l) = l
@@ -46,41 +43,139 @@ axesSize :: [Axis] -> Int
 axesSize = product . map axisLength
 
 singleton :: Elem -> Val
-singleton a = Arr [Ixd 1] (V.fromList [a])
+singleton = atoval . singletonl
+
+singletonl :: L a => a -> Arr a
+singletonl a = Arr [Ixd 1] (V.fromList [a])
 
 pair :: Elem -> Elem -> Val
-pair a b = Arr [Ixd 2] (V.fromList [a,b])
+pair = atoval .: pairl
 
-vchunksOf :: Int -> V.Vector a -> [V.Vector a]
-vchunksOf i v = V.fromListN i <$> chunksOf i (V.toList v)
+pairl :: L a => a -> a -> Arr a
+pairl a b = Arr [Ixd 2] (V.fromList [a,b])
+
+vchunksOf :: V.Vector v a => Int -> v a -> [v a]
+vchunksOf i v = go v
+  where go v =
+          let (l,r) = V.splitAt i v in
+          if V.null l then [] else l : go r
+
+tfmapb :: L b => Functor f => (forall a. L a => Arr a -> f (Arr b)) -> Val -> f Val
+tfmapb f = tap (fmap atoval . f)
+
+tmapb :: L b => (forall a. L a => Arr a -> Arr b) -> Val -> Val
+tmapb f = coerce (tfmapb (Identity . f))
+
+tfmap :: Functor f => (forall a. L a => Arr a -> f (Arr a)) -> Val -> f Val
+tfmap f = tap (fmap atoval . f)
+
+tmap :: (forall a. L a => Arr a -> Arr a) -> Val -> Val
+tmap f = coerce (tfmap (Identity . f))
+
+tmapq :: (forall a. L a => Arr a -> Arr a) -> ([Elem] -> [Elem]) -> Val -> Val
+tmapq f = coerce (tfmapq (Identity . f))
+
+tmapor :: (forall a. L a => Arr a -> Arr a) -> ([Elem] -> Val) -> Val -> Val
+tmapor f = coerce (tfmapor (Identity . f))
+
+tfmapq :: Functor f => (forall a. L a => Arr a -> f (Arr a)) -> ([Elem] -> f [Elem]) -> Val -> f Val
+tfmapq f g = tfmapor f (fmap Quot . g)
+
+tfmapor :: Functor f => (forall a. L a => Arr a -> f (Arr a)) -> ([Elem] -> f Val) -> Val -> f Val
+tfmapor f = tapq (fmap atoval . f)
+
+tap :: (forall a. L a => Arr a -> b) -> Val -> b
+tap f = tapq f (f . listl)
+
+tapq :: (forall a. L a => Arr a -> b) -> ([Elem] -> b) -> Val -> b
+tapq f _ (Ints    x) = f x
+tapq f _ (Nums    x) = f x
+tapq f _ (Chars   x) = f x
+tapq f _ (Symbols x) = f x
+tapq f _ (Paths   x) = f x
+tapq f _ (Elems   x) = f x
+tapq _ g (Quot    x) = g x
+
+traverseA :: (Applicative f, L a, L b) => (a -> f b) -> Arr a -> f (Arr b)
+traverseA f (Arr sh a) = Arr sh . V.fromList <$> traverse f (V.toList a)
+
+traverseA' :: (Applicative f, L a, L b, Vec a ~ Vec b) => (a -> f b) -> Arr a -> f (Arr b)
+traverseA' f (Arr sh a) = Arr sh <$> traverseV f a
+
+traverseV :: (V.Vector v a, V.Vector v b, Applicative f) => (a -> f b) -> v a -> f (v b)
+traverseV f xs =   -- copied from VB.Vector Traversable impl
+  let !n = V.length xs
+  in V.fromListN n <$> traverse f (V.toList xs)
+
+fmapArr' :: (L a, L b, Vec a ~ Vec b) => (a->b) -> Arr a -> Arr b
+fmapArr' f (Arr sh a) = Arr sh (V.map f a)
+
+fmapArr :: (L a, L b) => (a->b) -> Arr a -> Arr b
+fmapArr f = coerce . traverseA (Identity . f)
+
+tfmapb2 :: (Applicative f, L c)
+        => (forall a b. (L a, L b, L c) => Arr a -> Arr b -> f (Arr c))
+        -> Val -> Val -> f Val
+tfmapb2 f a b = f `tap` a `tfmapb` b
+
+tzip :: Functor f => (forall a. L a => Arr a -> Arr a -> f (Arr a)) -> Val -> Val -> f Val
+tzip f = tagree (fmap atoval .: f)
+
+tzipb :: L b => Functor f => (forall a. L a => Arr a -> Arr a -> f (Arr b)) -> Val -> Val -> f Val
+tzipb f = tagree (fmap atoval .: f)
+
+tagree :: (forall a. L a => Arr a -> Arr a -> b) -> Val -> Val -> b
+tagree f (Ints    x) (Ints    y) = f x y
+tagree f (Ints    x) (Nums    y) = f (fmapArr toRational x) y
+tagree f (Nums    x) (Ints    y) = f x (fmapArr toRational y)
+tagree f (Nums    x) (Nums    y) = f x y
+tagree f (Chars   x) (Chars   y) = f x y
+tagree f (Symbols x) (Symbols y) = f x y
+tagree f (Paths   x) (Paths   y) = f x y
+tagree f (Elems   x) (Elems   y) = f x y
+tagree f x y = on f (tap (fmapArr ltoelem)) x y
+
+agreeElem :: (forall a. L a => a -> a -> b) -> Elem -> Elem -> b
+agreeElem f (ENum    x) (ENum    y) = f x y
+agreeElem f (EChar   x) (EChar   y) = f x y
+agreeElem f (ESymbol x) (ESymbol y) = f x y
+agreeElem f (EPath   x) (EPath   y) = f x y
+agreeElem f x y = on f ltoelem x y
+
+agree :: (Applicative m, L c, L d) =>
+         (forall a. L a => a -> a -> m b) ->
+         c -> d -> m b
+agree f a b = agreeElem f (ltoelem a) (ltoelem b)
 
 firstCell :: Val -> Maybe Val
-firstCell (Arr (_ : sh) a) = Just (Arr sh (V.take (axesSize sh) a))
-firstCell (Arr [] _) = Nothing
-firstCell (Quot (a:_)) = Just (Atom a)
-firstCell (Quot []) = Nothing
+firstCell = tfmap firstCellL
 
-unconsCell :: Val -> Maybe (Val, Val)
-unconsCell (Arr (Ixd n : sh) a) = Just (on bimap Arr sh (Ixd (n-1) : sh)
-                                                     (V.splitAt (axesSize sh) a))
---unconsCell (Arr (Ixd n : sh) a) = Just (on (,) Arr (sh, Ixd (n-1) : sh) <<*>> V.splitAt (axesSize sh) a)
-unconsCell (Quot (a:as)) = Just (Atom a, Quot as)
-unconsCell _ = Nothing
+firstCellL :: Arr a -> Maybe (Arr a)
+firstCellL (Arr (_ : sh) a) = Just (Arr sh (V.take (axesSize sh) a))
+firstCellL (Arr [] _) = Nothing
 
-cellAt :: [Axis] -> V.Vector Elem -> Int -> Val
+--unconsCell :: Val -> Maybe (Val, Val)
+--unconsCell (Arr (Ixd n : sh) a) = Just (on bimap Arr sh (Ixd (n-1) : sh)
+--                                                     (V.splitAt (axesSize sh) a))
+----unconsCell (Arr (Ixd n : sh) a) = Just (on (,) Arr (sh, Ixd (n-1) : sh) <<*>> V.splitAt (axesSize sh) a)
+--unconsCell (Quot (a:as)) = Just (Atom a, Quot as)
+--unconsCell _ = Nothing
+
+cellAt :: L a => [Axis] -> Vec a -> Int -> Arr a
 cellAt sh a n = Arr sh (V.slice (n*size) size a) where size = axesSize sh
 
-rankRel :: Applicative m => Int -> [Axis] -> (Val -> m (V.Vector Elem)) -> Val -> m Val
-rankRel r newsh f (Arr' sh a) =
+rankRel :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) -> Arr a -> m (Arr b)
+rankRel r newsh f (Arr sh a) =
   Arr (lsh <> newsh) . V.concat <$> traverse (f . cellAt rsh a) [0..axesSize lsh]
   where (lsh,rsh) = splitAt r sh
 
-rankNumber :: Val -> Int -> Int
-rankNumber (shape -> axesSize -> len) r | r < 0     = min 0 (len + r)
-                                        | otherwise = max len r
+rankNumber :: Arr a -> Int -> Int
+rankNumber (Arr (axesSize -> len) _) r | r < 0     = min 0 (len + r)
+                                         | otherwise = max len r
 
-rank :: Applicative m => Int -> [Axis] -> (Val -> m (V.Vector Elem)) -> Val -> m Val
+rank :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) -> Arr a -> m (Arr b)
 rank r newsh f a = rankRel (rankNumber a r) newsh f a
+
 
 leadingAxis :: [Axis] -> [Axis] -> Maybe ([Axis], [Int], [Int])
 leadingAxis sh sh' = match sh sh'
@@ -92,135 +187,196 @@ leadingAxis sh sh' = match sh sh'
     match x  [] = trim sh  [0, axesSize x..] [0..]
     match [] y  = trim sh' [0..]             [0, axesSize y..]
 
-birankRel :: Applicative m
-          => Int -> Int
-          -> [Axis] -> (Val -> Val -> m (V.Vector Elem))
-          -> Val -> Val -> Maybe (m Val)
-birankRel r r' nrsh f (Arr' sh a) (Arr' sh' b) =
+birankRel :: (Applicative m, L a, L b, L c)
+           => Int -> Int
+           -> [Axis] -> (Arr a -> Arr b -> m (Vec c))
+           -> Arr a -> Arr b -> Maybe (m (Arr c))
+birankRel r r' nrsh f (Arr sh a) (Arr sh' b) =
   leadingAxis lsh lsh' <&> \(nlsh, i, i')->
     Arr (nlsh <> nrsh) . V.concat <$> zipWithM (\j j'-> f (cellAt rsh a j) (cellAt rsh' b j')) i i'
   where (lsh ,rsh ) = splitAt r  sh
         (lsh',rsh') = splitAt r' sh'
 
+tap2 :: (forall a b. (L a, L b) => Arr a -> Arr b -> c) -> Val -> Val -> c
+tap2 f = flip (tap (flip (tap f)))
+
 birank :: Applicative m
        => Int -> Int
-       -> [Axis] -> (Val -> Val -> m (V.Vector Elem))
+       -> [Axis] -> (Val -> Val -> m (VB.Vector Elem))
        -> Val -> Val -> Maybe (m Val)
-birank r r' newsh f a b = birankRel (rankNumber a r) (rankNumber b r') newsh f a b
+birank r r' newsh f a b =
+  fmap atoval <$> tap2 (birankL r r' newsh \x y -> f (atoval x) (atoval y)) a b
+
+birankL :: (Applicative m, L a, L b, L c)
+        => Int -> Int
+        -> [Axis] -> (Arr a -> Arr b -> m (Vec c))
+        -> Arr a -> Arr b -> Maybe (m (Arr c))
+birankL r r' newsh f a b = birankRel (rankNumber a r) (rankNumber b r') newsh f a b
 
 
-lazip :: Applicative m
-      => [Axis] -> (Elem -> Elem -> m (V.Vector Elem))
-      -> Val -> Val -> Maybe (m Val)
-lazip nrsh f (Arr' sh a) (Arr' sh' b) =
+lazip :: (Applicative m, L a, L b, L c)
+      => [Axis] -> (a -> b -> m (Vec c))
+      -> Arr a -> Arr b -> Maybe (m (Arr c))
+lazip nrsh f (Arr sh a) (Arr sh' b) =
   leadingAxis sh sh' <&> \(nlsh, i, i')->
     Arr (nlsh <> nrsh) . V.concat <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
 
-scalar :: Applicative m => (Elem -> m Elem) -> Val -> m Val
-scalar f = elements f'
-  where f' (EBox as) = EBox <$> scalar f as
-        f' a' = f a'
+lazip1 :: (Applicative m, L a, L b, L c) => (a -> b -> m c) -> Arr a -> Arr b -> Maybe (m (Arr c))
+lazip1 f = lazip [] (fmap V.singleton .: f)
 
-biscalar :: Applicative m
+scalar :: L b => Applicative m => (forall a. L a => a -> m b) -> Val -> m Val
+scalar f (Elems a) = Elems <$> traverseA go a
+  where go (EBox a) = EBox <$> scalar f a
+        go a               = ltoelem <$> f a
+scalar f a = tfmapb (traverseA f) a
+
+biscalar :: forall m c . Applicative m => L c
          => m Val   -- mismatched axes error value
-         -> (Elem -> Elem -> m Elem)
+         -> (forall a b . (L a, L b) => a -> b -> m c)
          -> Val -> Val -> m Val
-biscalar err f = fromMaybe err .: lazip [] (fmap V.singleton .: f')
+biscalar err f (Elems a) (Elems b) =
+  maybe err (fmap atoval) (lazip1 f' a b)
+  where f' :: Elem -> Elem -> m Elem
+        f' (EBox as) (EBox bs) = EBox <$> biscalar err f as bs
+        f' (EBox as) b         = EBox <$> scalar (  `f` b) as
+        f' a         (EBox bs) = EBox <$> scalar (a `f`  ) bs
+        f' a         b         = ltoelem <$> f a b
+biscalar err f (Elems a) b =
+  maybe err (fmap atoval) (tap (lazip1 f' a) b)
+  where f' :: L a => Elem -> a -> m Elem
+        f' (EBox as) b = EBox <$> scalar (`f` b) as
+        f' a         b = ltoelem <$> f a b
+biscalar err f a (Elems b) = --biscalar err (flip f) (Elems b) a
+  maybe err (fmap atoval) (tap (lazip1 f' b) a)
+  where f' :: L a => Elem -> a -> m Elem
+        f' (EBox bs) a = EBox <$> scalar (a `f`) bs
+        f' b         a = ltoelem <$> f a b
+biscalar err f a b = fromMaybe err (coerce (tfmapb2 (Compose .: lazip1 f) a b))
+
+
+pushLabel :: L a => Val -> Elem -> Vec a -> Val
+--pushLabel a n el = atoval (pushLabelL (valtoart a) n el)
+pushLabel a n el = coerce (tzip go a (atoval (Arr [] el)))
   where
-    --f' :: Elem -> Elem -> m Elem
-    f' (EBox as) (EBox bs) = EBox <$> biscalar err f as bs
-    f' (EBox as) b'        = EBox <$> scalar (   `f'` b') as
-    f' a'        (EBox bs) = EBox <$> scalar (a' `f'`   ) bs
-    f' a'        b'        = f a' b'
+    go :: forall a. L a => Arr a -> Arr a -> Identity (Arr a)
+    go a (Arr _ el) = Identity (pushLabelL a n el)
 
-elements :: Applicative m => (Elem -> m Elem) -> Val -> m Val
-elements f (Arr sh a) = Arr sh <$> traverse f a
-elements f (Quot a) = Quot <$> traverse f a
-
-
-pushLabel :: Val -> Elem -> V.Vector Elem -> Val
-pushLabel (Arr shp@(Nmd (Bivector nms ei) : sh') v) n el =
+pushLabelL :: L a => Arr a -> Elem -> Vec a -> Arr a
+pushLabelL (Arr shp@(Nmd (Bivector nms ei) : sh') v) n el =
   assert (V.length el == axesSize sh')
   case HM.lookup n ei of
     Just x  -> Arr shp (V.modify (flip V.copy el . VM.slice (x * axesSize sh') (axesSize sh')) v)
     Nothing -> Arr (Nmd (Bivector (V.snoc nms n)
                                   (HM.insert n (V.length nms) ei)) : sh')
-                   (v V.++ el)
-pushLabel _ _ _ = undefined
+                    (v V.++ el)
+pushLabelL _ _ _ = undefined
 
-mergeRecords :: Bivector Elem -> Bivector Elem -> [Axis] -> V.Vector Elem -> V.Vector Elem -> Val
+mergeRecords :: Bivector Elem -> Bivector Elem -> [Axis] -> Vec Elem -> Vec Elem -> Val
 mergeRecords left (Bivector nms' _) sh a b =
   foldl (uncurry . pushLabel)
+        (Elems (Arr (Nmd left : sh) a))
+        (zip (V.toList nms') (vchunksOf (axesSize sh) b))
+
+mergeRecordsL :: L a => Bivector Elem -> Bivector Elem -> [Axis] -> Vec a -> Vec a -> Arr a
+mergeRecordsL left (Bivector nms' _) sh a b =
+  foldl (uncurry . pushLabelL)
         (Arr (Nmd left : sh) a)
         (zip (V.toList nms') (vchunksOf (axesSize sh) b))
+
 
 isScalar :: Elem -> Bool
 isScalar (EBox _) = True
 isScalar _        = False
 
 enclose :: Val -> Val
-enclose = Atom . asElem
+enclose x = Elems ( Atom (asElem x))
 
 asElem :: Val -> Elem
-asElem c@(Atom (EBox _)) = EBox c
-asElem (Atom e)          = e
-asElem c                 = EBox c
+asElem c@(Elems (Atom _)) = EBox c
+asElem x = tap go x
+  where go (Atom e) = ltoelem e
+        go a = EBox (atoval a)
 
 unwrap :: Elem -> Val
 unwrap (EBox a) = a
-unwrap a        = Atom a
+unwrap a        = Elems (Atom a)
+
 
 asAxes :: Val -> Maybe [Axis]
-asAxes (Atom x) = pure <$> asAxis x
-asAxes (Arr' [Ixd n] xs) = assert (length xs == n)$ traverse asAxis (V.toList xs)
-asAxes _ = Nothing
+asAxes = tap asAxesL
+
+asAxesL :: L a => Arr a -> Maybe [Axis]
+asAxesL (Atom x) = pure <$> asAxis (ltoelem x)
+asAxesL (Arr [Ixd n] xs) = assert (V.length xs == n)
+                           do traverse (asAxis.ltoelem) (V.toList xs)
+asAxesL _ = Nothing
 
 asAxis :: Elem -> Maybe Axis
 asAxis (ENum x) = Just (Ixd (fromEnum x))
-asAxis (EBox (Arr' [Ixd n] xs)) = assert (length xs == n)$ Just (Names xs)
+asAxis (EBox (Elems (Arr [Ixd n] xs))) = assert (length xs == n)$ Just (Names xs)
 asAxis _ = Nothing
 
+
 reshape :: [Axis] -> Val -> Val
-reshape sh' (Arr sh a) = Arr sh' (V.concat (replicate d a <> [V.take m a]))
+reshape sh' = tmapor (reshapel sh') (q sh')
+  where q [Ixd size] l = Quot  (take size (cycle l))
+        q sh'        l = Elems (Arr sh' (V.fromListN (axesSize sh') (cycle l)))
+
+reshapel :: [Axis] -> Arr a -> Arr a
+reshapel sh' (Arr sh a) = Arr sh' (V.concat (replicate d a <> [V.take m a]))
   where (d,m) = on divMod axesSize sh' sh
-reshape [Ixd size] (Quot l) = Quot (take size (cycle l))
-reshape sh'@(axesSize -> size) (Quot l) = Arr sh' (V.fromListN size (cycle l))
 
 deshape :: Val -> Val
-deshape (Arr sh a) = Arr [Ixd (axesSize sh)] a
-deshape (Quot a)   = Quot a
+deshape = tmapq deshapel id
+
+deshapel :: L a => Arr a -> Arr a
+deshapel (Arr sh a) = Arr [Ixd (axesSize sh)] a
+
 
 construct :: Val -> Val -> Maybe Val
 construct (Quot a) b = Just (Quot (asElem b : a))
-construct (Atom a) (Atom b) = Just (pair b a)
-construct (Arr (Ixd n : sh) a) (Arr' sh' b) | sh == sh' = Just (Arr (Ixd (n + 1) : sh) (b V.++ a))
-construct _ _ = Nothing
+construct a b = tzip go a b
+  where
+    --go :: Arr a -> Arr a -> Maybe (Arr a)
+    go (Atom a) (Atom b) = Just (pairl a b)
+    go (Arr (Ixd n : sh) a) (Arr sh' b) | sh == sh' = Just (Arr (Ixd (n+1) : sh) (b V.++ a))
+    go _ _ = Nothing
+--construct (Arr (Ixd n : sh) a) (Arr' sh' b) | sh == sh' = Just (Arr (Ixd (n + 1) : sh) (b V.++ a))
+--construct _ _ = Nothing
 
 catenate :: Val -> Val -> Maybe Val
 catenate (Quot a) (Quot b) = Just (Quot (a ++ b))
-catenate (Atom a) (Atom b) = Just (pair a b)
-catenate (Arr' (Ixd n : sh) a) (Arr' (Ixd n' : sh') b) | sh == sh' = Just (Arr (Ixd (n + n') : sh) (a V.++ b))
-catenate (Arr' (Ixd n : sh) a) (Arr'           sh'  b) | sh == sh' = Just (Arr (Ixd (n + 1 ) : sh) (a V.++ b))
-catenate (Arr'          sh  a) (Arr' (Ixd n' : sh') b) | sh == sh' = Just (Arr (Ixd (1 + n') : sh) (a V.++ b))
-catenate (Arr' (Nmd n : sh) a) (Arr' (Nmd n' : sh') b) | sh == sh' = Just (mergeRecords n n' sh a b)
-catenate _ _ = Nothing
+catenate a b = tzip go a b
+  where
+    go (Atom a) (Atom b) = Just (pairl a b)
+    go (Arr (Ixd n : sh) a) (Arr (Ixd n' : sh') b) |sh==sh'= Just (Arr (Ixd (n + n') : sh) (a V.++ b))
+    go (Arr (Ixd n : sh) a) (Arr           sh'  b) |sh==sh'= Just (Arr (Ixd (n + 1 ) : sh) (a V.++ b))
+    go (Arr          sh  a) (Arr (Ixd n' : sh') b) |sh==sh'= Just (Arr (Ixd (1 + n') : sh) (a V.++ b))
+    go (Arr (Nmd n : sh) a) (Arr (Nmd n' : sh') b) |sh==sh'= Just (mergeRecordsL n n' sh a b)
+    go _ _ = Nothing
 
 fitsIn :: Int -> Int -> Bool
 fitsIn len n = n >= 0 && n < len
 
 indexCell :: Int -> Val -> Maybe Val
-indexCell n (Arr (ax : sh) a) | n `fitsIn` axisLength ax = Just (cellAt sh a n)
-                              | otherwise                = Nothing
-indexCell _ (Arr [] _) = Nothing
-indexCell n (Quot elems) | n `fitsIn` length elems = Just (Atom (elems !! n))
-                         | otherwise               = Nothing
+indexCell n (Quot elems) = guard (n `fitsIn` length elems) $> Elems (Atom (elems !! n))
+indexCell n x = tfmap (indexCellL n) x
 
-indexCellByName :: Elem -> Val -> Maybe Val
+indexCellL :: forall a. L a => Int -> Arr a -> Maybe (Arr a)
+indexCellL n (Arr (ax : sh) a) = guard (n `fitsIn` axisLength ax) $> cellAt sh a n
+indexCellL _ (Arr [] _) = Nothing
+
+indexCellByName :: Elem -> Arr a -> Maybe (Arr a)
 indexCellByName i (Arr (Nmd (Bivector _ ei) : sh) a) = cellAt sh a <$> HM.lookup i ei
 indexCellByName _ _ = Nothing
 
 indexElement :: [Either Int Elem] -> Val -> Maybe Elem
-indexElement is (Arr sh a) | length sh == length is =
+indexElement [Left n] (Quot a) = guard (n `fitsIn` length a) $> a !! n
+indexElement is x = tap (fmap ltoelem . indexElementL is) x
+
+indexElementL :: forall a. L a => [Either Int Elem] -> Arr a -> Maybe a
+indexElementL is (Arr sh a) =
+  guard (length sh == length is) >>
   zipWithM \cases
     (Ixd end)              (Left n) -> guard (n `fitsIn` end       ) $> n
     (Nmd (Bivector nms _)) (Left n) -> guard (n `fitsIn` length nms) $> n
@@ -228,13 +384,11 @@ indexElement is (Arr sh a) | length sh == length is =
     (Nmd (Bivector _ ie))  (Right i) -> HM.lookup i ie
   sh is
   <&> \indices-> a V.! (sum . zipWith (*) indices . tail . scanr (*) 1 . map axisLength) sh
-indexElement [Left n] (Quot a) = guard (n `fitsIn` length a) $> a !! n
-indexElement _ _ = Nothing
 
+
+shortShowL :: L a => Arr a -> String
+shortShowL (Atom a) = lshow a
+shortShowL (Arr sh a) = "{" <> show sh <> "⍴" <> (V.toList a >>= (" " <>) . lshow) <> "}"
 
 shortShow :: Val -> String
-shortShow (Atom (ENum x)) | d == 1 = show n
-                   | otherwise = show n <> "/" <> show d
-  where n = numerator x ; d = denominator x
-shortShow (Atom (EChar x)) = "'" <> show x <> "'"
-shortShow x = show x
+shortShow = tap shortShowL
