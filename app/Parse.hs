@@ -72,9 +72,9 @@ parseIdent = do
 parseObj :: Parser Obj
 parseObj = choice
   [ Numlit <$> decimal
-  -- , (single '?' *> parseIdent) >>= \case
-  --     Cmd name -> return (LitLabel name)
-  --     _         -> fail "?xyz[] is invalid"
+  , (single '$' *> parseIdent) >>= \case
+      Cmd name -> return (LitLabel name)
+      _        -> fail "?xyz[] is invalid"
   , single '(' *> sc *> many parseObj
     <**> (QuotF <$ single ')' <|> QuotUnf <$ eof)
   , parseIdent

@@ -1,7 +1,7 @@
 module Prim where
 
 import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..))
-import Arr (scalar, biscalar, catenate, construct, asAxes, reshape, agree)
+import Arr (scalar, biscalar, catenate, construct, asAxes, reshape, agree, axesToVal, shape, spec)
 import qualified Data.Text as T
 import Data.Functor (($>))
 
@@ -30,7 +30,7 @@ fromMaybeErr err = maybe (cashError err) pure
 
 
 monum :: CashMonad m => (Rational -> m Rational) -> Val -> m Val
-monum f = scalar (mathRat f)
+monum f = scalar (spec (mathRat f))
 
 binum :: CashMonad m => (Rational -> Rational -> m Rational) -> Val -> Val -> m Val
 binum f = biscalar (cashError MismatchingAxes) (agree (mathRat2 f))
@@ -63,13 +63,14 @@ exec FAdd = bi (ufbinum (+))
 exec FSub = bi (ufbinum (-))
 exec FMul = bi (ufbinum (*))
 exec FDiv = bi (ufbinum (/))
-exec FNeg = mo (ufmonum negate)
-exec FCat = bi (fromMaybeErr ShapeError .: catenate)
+exec FNot = mo (ufmonum (toRational . fromEnum . (== 0)))
+exec FCat  = bi (fromMaybeErr ShapeError .: catenate)
 exec FCons = bi (fromMaybeErr ShapeError .: construct)
-exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes x <*> pure y)
+exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes y <*> pure x)
+exec FShape   = mo (pure . axesToVal . shape)
 exec FDrop = \case     (_:xs) -> pure        xs  ; xs -> udf 1 xs
 exec FDup  = \case     (x:xs) -> pure   (x:x:xs) ; xs -> udf 1 xs
 exec FSwap = \case   (y:x:xs) -> pure   (x:y:xs) ; xs -> udf 2 xs
-exec FRot  = \case (z:y:x:xs) -> pure (y:x:z:xs) ; xs -> udf 3 xs
+exec FRot  = \case (z:y:x:xs) -> pure (x:z:y:xs) ; xs -> udf 3 xs
 exec FOver = \case   (y:x:xs) -> pure (y:x:y:xs) ; xs -> udf 2 xs
 exec FShow = mo0 (cashLog . Output . T.pack . show)

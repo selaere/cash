@@ -131,13 +131,11 @@ data Def = Def Fun Int
   deriving (Eq, Generic, Show)
 
 --data Fun = Fun (forall m. CashMonad m => [Val] -> m [Val])
-data Fun = FAdd | FSub | FMul | FDiv | FNeg | FCat | FCons | FReshape | FShape
+data Fun = FAdd | FSub | FMul | FDiv | FNot | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
 -- | FQuot [Act]
   deriving (Eq, Generic, Show)
 instance Hashable Fun
-
-data Types = TInt | TNum | TChar | TSymbol | TPath | TElem
 
 data ValErr = NotANumber Elem | NotANumber2 Elem Elem
   deriving (Eq, Show)

@@ -1,10 +1,10 @@
-! not
-" show       "
+! drop
+" show/lit  "
 # length
-$ call
+$ label/var
 % mod
 & and
-' drop       '
+' cat  '
 * mul
 + add
 , swap
@@ -18,20 +18,20 @@ $ call
 > great
 ? equals
 @ swap nth
-\ r@
-^ cons
-_ label/in var
-` cat
+\ or
+^ call/comb
+_ in_ident, neg _123, _ line comment
+` cons?
 { >r
-| or
+| r@
 } r>
-~ neg
+~ not?
 
 A append file
 B break array
 C copy file
 D dir file
-E enlist array
+E extend array
 F folder file
 G greater number
 H head array
@@ -41,14 +41,14 @@ K kernel array
 L lesser number
 M move file
 N nudge array
-O reorganize array
+O open file
 P power number
 Q query array
-R read file
+R reverse array
 S sort array
 T tail array
 U unlink file
-V reverse array
+V vector array
 W write file
 X exclude array
 Y yank array
@@ -82,31 +82,32 @@ x( exclude (filter)
 y( if yes
 z( zip
 
-
-
-
-
-
 a[ regex all matches
 b[ regex split
-c[ csv
+c[ char
+d[ digits (generalized bytestring)
 e[ escaped
-g[ grep
 f[ find file
-i[ ini
+g[ grep
+h[ shell
+i[ 
 j[ json
+k[ numbers (similar to ⎕VFI)
 l[ lines
-n[ numbers
 m[ regex fullmatch
-o[ regex literal
-p[ path literal
-q[ regex index of first match
+n[ pathname literal
+o[ 
+p[ printf
+q[ regex query
 r[ regex replace
 s[ regex search
-w[ whitespace trimmed
-x[ xml
-.[ argument parse
- [ bytes
- [ char
- [ shell, bash
- [ run command
+t[ trim whitespace
+u[
+v[ env var?
+w[ words (symbols?)
+x[ execute file at?
+y[
+z[ format
+_[ comment
+$[ symbols
+

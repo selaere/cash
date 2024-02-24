@@ -27,7 +27,13 @@ list :: [Elem] -> Val
 list = atoval . listl
 
 listl :: L a => [a] -> Arr a
-listl (V.fromList -> elems) = Arr [Ixd (V.length elems)] elems
+listl = vecl . V.fromList
+
+vec :: Vec Elem -> Val
+vec = atoval . vecl
+
+vecl :: L a => Vec a -> Arr a
+vecl elems = Arr [Ixd (V.length elems)] elems
 
 shapel :: Arr a -> [Axis]
 shapel (Arr sh _) = sh
@@ -142,6 +148,16 @@ agreeElem f (ESymbol x) (ESymbol y) = f x y
 agreeElem f (EPath   x) (EPath   y) = f x y
 agreeElem f x y = on f ltoelem x y
 
+-- this probably shouldn't exist. i haven't made my mind up on it
+spec :: forall b c. L b => (forall a. L a => a -> c) -> b -> c
+spec f = go f . ltoelem
+  where go :: (forall a. L a => a -> c) -> Elem -> c
+        go f (ENum    x) = f x
+        go f (EChar   x) = f x
+        go f (ESymbol x) = f x
+        go f (EPath   x) = f x
+        go f x           = f x
+
 agree :: (Applicative m, L c, L d) =>
          (forall a. L a => a -> a -> m b) ->
          c -> d -> m b
@@ -183,9 +199,9 @@ leadingAxis sh sh' = match sh sh'
     trim nsh i i' = Just (nsh, take (axesSize nsh) i, take (axesSize nsh) i')
     match (x:xs) (y:ys) | x == y    = match xs ys
                         | otherwise = Nothing
-    match [] [] = trim sh  [0..]             [0..]
-    match x  [] = trim sh  [0, axesSize x..] [0..]
-    match [] y  = trim sh' [0..]             [0, axesSize y..]
+    match [] [] = trim sh  [0..]                              [0..]
+    match x  [] = trim sh  [0..]                              ([0..] >>= replicate (axesSize x))
+    match [] y  = trim sh' ([0..] >>= replicate (axesSize y)) [0..]
 
 birankRel :: (Applicative m, L a, L b, L c)
            => Int -> Int
@@ -227,7 +243,7 @@ lazip1 f = lazip [] (fmap V.singleton .: f)
 scalar :: L b => Applicative m => (forall a. L a => a -> m b) -> Val -> m Val
 scalar f (Elems a) = Elems <$> traverseA go a
   where go (EBox a) = EBox <$> scalar f a
-        go a               = ltoelem <$> f a
+        go a        = ltoelem <$> f a
 scalar f a = tfmapb (traverseA f) a
 
 biscalar :: forall m c . Applicative m => L c
@@ -392,3 +408,13 @@ shortShowL (Arr sh a) = "{" <> show sh <> "⍴" <> (V.toList a >>= (" " <>) . ls
 
 shortShow :: Val -> String
 shortShow = tap shortShowL
+
+axisToElem :: Axis -> Elem
+axisToElem (Ixd n) = ENum (toRational n)
+axisToElem (Names n) = EBox (vec n)
+
+axesToVal :: [Axis] -> Val
+axesToVal sh = if all isIxd sh then Ints (listl (fromIntegral . axisLength <$> sh))
+                               else list (axisToElem <$> sh)
+  where isIxd (Ixd _) = True
+        isIxd (Nmd _) = False
