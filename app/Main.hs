@@ -1,7 +1,7 @@
 module Main where
 import Parse (parse)
 import qualified Data.Text.IO
-import Rt (defaultRtState, RtM, run)
+import Rt (defaultRtState, RtM, run, addSource)
 import System.IO (stdout, hFlush)
 import Val (Val)
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -15,12 +15,15 @@ infixr 8 .:
 (f .: g) x y = f (g x y)
 
 main :: IO ()
-main = S.evalStateT (bee []) defaultRtState
+main = S.evalStateT (repl 1 []) defaultRtState
 
-bee :: [Val] -> RtM ()
-bee o = liftIO ( putStr ("\x1b[32m" <> (reverse o >>= (' ':).shortShow) <> " \x1b[0m")
-              >> hFlush stdout
-              >> Data.Text.IO.getLine)
-        >>= liftIO . parse 
-        >>= flip run o
-        >>= bee
+repl :: Int -> [Val] -> RtM ()
+repl n o = do 
+  src <- liftIO ( putStr ("\x1b[32m" <> (reverse o >>= (' ':).shortShow) <> " \x1b[0m")
+                >> hFlush stdout
+                >> Data.Text.IO.getLine)
+  toks <- liftIO (parse name src)
+  addSource name src
+  run toks o
+    >>= repl (n+1)
+  where name = "[repl "<>show n<>"]"

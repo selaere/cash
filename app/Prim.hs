@@ -22,7 +22,7 @@ instance Error PrimError where
   --showErr MismatchingAxes = Output (T.pack "mismatching axes")
   --showErr (Underflow a b) = Output (T.pack
   --  ("stack underflow: need at least "<>show a<>" values on stack, i have "<>show b))
-  showErr x = Output (T.pack (show x))
+  showErr = pure . Output . T.pack . show
   errAsVal _ = undefined
 
 fromMaybeErr :: CashMonad m => Error e => e -> Maybe a -> m a

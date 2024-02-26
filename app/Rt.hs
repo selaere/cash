@@ -1,25 +1,26 @@
 module Rt where
-import Parse (Obj(..), Ident)
-import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem (..), Act(..), Fun)
+import Parse (Tok(..), Obj(..), Ident, Position(..), formatLine)
+import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem(..), Act(..), Fun)
 import Arr (pattern Atom, asElem, list)
 import qualified Control.Monad.Trans.State as S
 import qualified Data.HashMap.Strict as HM
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import qualified Data.Text as T
 import qualified Val
-import Control.Applicative (empty)
 import Data.Functor ((<&>))
 import Data.Bifunctor (first)
 import Data.List (singleton)
 import Prim (exec)
 import Control.Lens ((%=), Traversal', use, at, (.=))
 import Data.Maybe (fromMaybe)
+import System.Exit (exitFailure)
 
 data RtState = RtState { stacks :: HM.HashMap Ident [Val]
-                       , defs   :: HM.HashMap Ident Def }
+                       , defs   :: HM.HashMap Ident Def
+                       , sources:: HM.HashMap FilePath T.Text }
 
 defaultRtState :: RtState
-defaultRtState = RtState { stacks = HM.empty, defs = primitives }
+defaultRtState = RtState { stacks = HM.empty, defs = primitives, sources = HM.empty }
 
 primitives :: HM.HashMap Ident Def
 primitives = HM.fromList $ map (\(x,y,z) -> (T.pack x, Def y z))
@@ -40,19 +41,32 @@ primitives = HM.fromList $ map (\(x,y,z) -> (T.pack x, Def y z))
   , ("\"",Val.FShow,    0)
   ]
 
-_stacks :: Traversal' RtState (HM.HashMap Ident [Val])
-_defs   :: Traversal' RtState (HM.HashMap Ident Def)
-_stacks f r = f (stacks r) <&> \x -> r {stacks = x}
-_defs   f r = f (defs   r) <&> \x -> r {defs   = x}
+_stacks  :: Traversal' RtState (HM.HashMap Ident [Val])
+_defs    :: Traversal' RtState (HM.HashMap Ident Def)
+_sources :: Traversal' RtState (HM.HashMap FilePath T.Text)
+_stacks  f r = f (stacks  r) <&> \x -> r {stacks = x}
+_defs    f r = f (defs    r) <&> \x -> r {defs   = x}
+_sources f r = f (sources r) <&> \x -> r {sources= x}
 
 
 type RtM = S.StateT RtState IO
 
 instance CashMonad RtM where
-  cashLog (Output x) = liftIO (print x)
-  cashLog (OutputRed x) = liftIO (print (T.pack "<red>" <> x <> T.pack "</red>"))
-  cashError err = cashLog (showErr err) >> empty
+  cashLog (Output x) = liftIO (putStr (T.unpack x))
+  cashLog (OutputRed x) = liftIO (putStr ("\x1b[31m" <> T.unpack x <> "\x1b[0m"))
+  cashError err = (showErr err >>= cashLog) >> liftIO exitFailure
   effect = liftIO . doEffect
+  source name = use (_sources.at name)
+
+showErrSrcd :: CashMonad m => RtErr -> m String
+showErrSrcd (WithOffset (Position name offset) err) =
+  (<>) . \case
+    Just src -> formatLine src name offset
+    Nothing  -> "at file "<>show name<>" (unavailable)\n"
+  <$> source name
+  <*> showErrSrcd err
+showErrSrcd err = pure (show err <> "\n")
+
 
 
 data RtErr
@@ -62,17 +76,11 @@ data RtErr
   | UnexpectedQuot
   | VarNotThere Ident
   | UnfCombinator Fun [[Act]]
+  | WithOffset Position RtErr
   deriving (Eq, Show)
 
-
 instance Error RtErr where
-  -- showErr (CmdNotFound i) = Output (i<>T.pack " not found")
-  -- showErr EmptyStream     = Output (T.pack "empty stream")
-  -- showErr (PatNotFound i) = Output (i<>T.pack "[ not found")
-  -- showErr UnexpectedQuot = Output (T.pack "unexpected quotation")
-  -- showErr (VarNotThere i) = Output (T.pack"variable "<>i<>T.pack " not found")
-  -- showErr (UnfCombinator) = 
-  showErr x = Output (T.pack (show x))
+  showErr err = Output . T.pack <$> showErrSrcd err
   errAsVal = undefined
 
 placeholderActsToVal :: [Act] -> Val
@@ -101,46 +109,51 @@ doAct (Pop  var) xs =
     Nothing      -> cashError (VarNotThere var)
 doAct (Const x) xs = pure (x:xs)
 
+addSource :: FilePath -> T.Text -> RtM ()
+addSource path src = _sources %= HM.insert path src
 
-run :: [Obj] -> [Val] -> RtM [Val]
+run :: [Tok] -> [Val] -> RtM [Val]
 run [] s = return s
 run os s = use _defs >>= \d-> case cutAct d os of
   Left err         -> cashError err
   Right (act, os') -> doAct act s >>= run os'
 
 
-runWith :: RtState -> [Obj] -> [Val] -> IO ([Val], RtState)
+runWith :: RtState -> [Tok] -> [Val] -> IO ([Val], RtState)
 runWith r os s = S.runStateT (run os s) r
 
 
-cutQuot :: HM.HashMap Ident Def -> [Obj] -> Either RtErr ([Act], [Obj])
-cutQuot defs (QuotF   a : os) = (,os) <$> readQuot defs a
-cutQuot defs (QuotUnf a : os) = (,os) <$> readQuot defs a -- todo do something different
-cutQuot defs a                = first singleton <$> cutAct defs a
+cutQuot :: HM.HashMap Ident Def -> [Tok] -> Either RtErr ([Act], [Tok])
+cutQuot defs (Tok loc (QuotF   a) : os) = first (WithOffset loc) ((,os) <$> readQuot defs a)
+cutQuot defs (Tok loc (QuotUnf a) : os) = first (WithOffset loc) ((,os) <$> readQuot defs a)
+   -- todo do something different
+cutQuot defs a                          = first singleton <$> cutAct defs a
 
-cutAct :: HM.HashMap Ident Def -> [Obj] -> Either RtErr (Act, [Obj])
-cutAct defs (Cmd ident : os) =
+cutAct' :: HM.HashMap Ident Def -> Obj -> [Tok] -> Either RtErr (Act, [Tok])
+cutAct' defs (Cmd ident) os =
   case HM.lookup ident defs of
     Just (Def call arity) -> readQuotN defs ([], os) arity <&> first (Comb call)
     Nothing               -> Left (CmdNotFound ident)
-cutAct _efs (Numlit i : os)   = Right (Const (Nums (Atom (toRational i))), os)
-cutAct _efs (LitLabel l : os) = Right (Const (Symbols (Atom (Val.Symbol l))), os)
-cutAct defs (QuotF a : os) = (,os) . Const . placeholderActsToVal <$> readQuot defs a
-cutAct defs (QuotUnf a : os) = cutAct defs (QuotF a : os)
-cutAct _efs (Literal i t : os) | T.null i = Right (Const (list (EChar <$> T.unpack t)), os)
+cutAct' _efs (Numlit i) os   = Right (Const (Nums (Atom (toRational i))), os)
+cutAct' _efs (LitLabel l) os = Right (Const (Symbols (Atom (Val.Symbol l))), os)
+cutAct' defs (QuotF a) os = (,os) . Const . placeholderActsToVal <$> readQuot defs a
+cutAct' defs (QuotUnf a) os = cutAct' defs (QuotF a) os
+cutAct' _efs (Literal i t) os | T.null i = Right (Const (list (EChar <$> T.unpack t)), os)
                                | otherwise= Left (PatNotFound i)
-cutAct _efs (OPush i : os) = Right (Push i, os)
-cutAct _efs (OPeek i : os) = Right (Peek i, os)
-cutAct _efs (OPop  i : os) = Right (Pop  i, os)
+cutAct' _efs (OPush i) os = Right (Push i, os)
+cutAct' _efs (OPeek i) os = Right (Peek i, os)
+cutAct' _efs (OPop  i) os = Right (Pop  i, os)
 
+cutAct :: HM.HashMap Ident Def -> [Tok] -> Either RtErr (Act, [Tok])
+cutAct defs (Tok loc obj : os) = first (WithOffset loc) (cutAct' defs obj os)
 cutAct _efs [] = Left EmptyStream
 
-readQuot :: HM.HashMap Ident Def -> [Obj] -> Either RtErr [Act]
+readQuot :: HM.HashMap Ident Def -> [Tok] -> Either RtErr [Act]
 readQuot _    [] = Right []
-readQuot defs a = cutAct defs a >>= \(c, xs) -> (c:) <$> readQuot defs xs
+readQuot defs a  = cutAct defs a >>= \(c, xs) -> (c:) <$> readQuot defs xs
 
 
-readQuotN :: HM.HashMap Ident Def -> ([[Act]], [Obj]) -> Int -> Either RtErr ([[Act]], [Obj])
+readQuotN :: HM.HashMap Ident Def -> ([[Act]], [Tok]) -> Int -> Either RtErr ([[Act]], [Tok])
 readQuotN _    (cs, os) 0 = Right (cs, os)
 readQuotN defs (cs, os) k = cutQuot defs os >>= \(c, os')-> readQuotN defs (c:cs, os') (k-1)
 

@@ -108,14 +108,16 @@ instance Effect ReadFile T.Text where
   doEffect (ReadFile path) = TIO.readFile path
   effOut (ReadFile path) = Output (T.pack ("read file at "<>path))
 
-class Error m where
-  errAsVal :: m -> Val
-  showErr :: m -> Output
+class Error e where
+  errAsVal :: e -> Val
+  showErr :: CashMonad m => e -> m Output
 
 class (Monad m) => CashMonad m where
   cashLog :: Output -> m ()
   cashError :: Error e => e -> m a
   effect :: Effect e o => e -> m o
+  source :: FilePath -> m (Maybe T.Text)
+  source _ = pure Nothing
 
 data Act = Comb Fun [[Act]]
          | CombUnf Fun [[Act]]
@@ -141,7 +143,7 @@ data ValErr = NotANumber Elem | NotANumber2 Elem Elem
   deriving (Eq, Show)
 
 instance Error ValErr where
-  showErr x = Output (T.pack (show x))
+  showErr x = pure (Output (T.pack (show x)))
   errAsVal = undefined
 
 
