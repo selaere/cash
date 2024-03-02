@@ -1,9 +1,10 @@
 module Prim where
 
-import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..))
+import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..), ValErr(..))
 import Arr (scalar, biscalar, catenate, construct, asAxes, reshape, agree, axesToVal, shape, spec, forceQuot)
 import qualified Data.Text as T
 import Data.Functor (($>))
+import Data.Function (on)
 
 
 infixr 8 .:
@@ -18,15 +19,22 @@ data PrimError
   deriving (Eq, Show)
 
 instance Error PrimError where
-  --showErr NotNumber       = Output (T.pack "not a number")
-  --showErr MismatchingAxes = Output (T.pack "mismatching axes")
-  --showErr (Underflow a b) = Output (T.pack
-  --  ("stack underflow: need at least "<>show a<>" values on stack, i have "<>show b))
   showErr = pure . Output . T.pack . show
   errAsVal _ = undefined
 
 fromMaybeErr :: CashMonad m => Error e => e -> Maybe a -> m a
 fromMaybeErr err = maybe (cashError err) pure
+
+
+mathRat :: (L a, CashMonad m) => (Rational -> m Rational) -> a -> m Rational
+mathRat f a = case toRat a of
+  Just n  -> f n
+  Nothing -> cashError (NotANumber (ltoelem a))
+mathRat2 :: (L a, CashMonad m) => (Rational -> Rational -> m Rational) -> a -> a -> m Rational
+mathRat2 f a b = case (toRat a, toRat b) of
+  (Just a', Just b') -> f a' b'
+  (Just _, Nothing) -> cashError (on NotANumber2 ltoelem b a)
+  (_, _)            -> cashError (on NotANumber2 ltoelem a b)
 
 
 monum :: CashMonad m => (Rational -> m Rational) -> Val -> m Val

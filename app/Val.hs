@@ -148,7 +148,6 @@ instance Error ValErr where
   showErr x = pure (Output (T.pack (show x)))
   errAsVal = undefined
 
-
 type Vec a = VecL a a
 class (V.Vector (VecL a) a, Eq a, Show a, Eq (Vec a), Show (Vec a)) => L a where
 
@@ -161,10 +160,8 @@ class (V.Vector (VecL a) a, Eq a, Show a, Eq (Vec a), Show (Vec a)) => L a where
   math _ a = cashError (NotANumber (ltoelem a))
   math2 :: (L a, CashMonad m) => (forall x y z. (Num x, Num y, Num z) => x -> y -> m z) -> a -> a -> m a
   math2 _ a b = cashError (on NotANumber2 ltoelem a b)
-  mathRat :: (L a, CashMonad m) => (Rational -> m Rational) -> a -> m Rational
-  mathRat _ a = cashError (NotANumber (ltoelem a))
-  mathRat2 :: (L a, CashMonad m) => (Rational -> Rational -> m Rational) -> a -> a -> m Rational
-  mathRat2 _ a b = cashError (on NotANumber2 ltoelem a b)
+  toRat :: L a => a -> Maybe Rational
+  toRat _ = Nothing
 
 instance L Elem where
   type VecL Elem = VB.Vector
@@ -172,6 +169,8 @@ instance L Elem where
   atoval   = Elems
   lshow (ENum a) = lshow a
   lshow a        = show a
+  toRat (ENum a) = Just a
+  toRat _        = Nothing
 
 instance L Int64 where
   type VecL Int64 = VU.Vector
@@ -180,8 +179,7 @@ instance L Int64 where
   lshow    = show
   math     f = f
   math2    f = f
-  mathRat  f = f . toRational
-  mathRat2 f = on f toRational
+  toRat = Just . toRational
 
 instance L Rational where
   type VecL Rational = VB.Vector
@@ -192,8 +190,7 @@ instance L Rational where
     where n = numerator x ; d = denominator x
   math     f = f
   math2    f = f
-  mathRat  f = f
-  mathRat2 f = f
+  toRat = Just
 
 instance L Char where
   type VecL Char = VU.Vector
