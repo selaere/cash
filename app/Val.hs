@@ -116,6 +116,7 @@ class (Monad m) => CashMonad m where
   cashLog :: Output -> m ()
   cashError :: Error e => e -> m a
   effect :: Effect e o => e -> m o
+  callQuot :: [Elem] -> [Val] -> m [Val]
   source :: FilePath -> m (Maybe T.Text)
   source _ = pure Nothing
 
@@ -135,6 +136,7 @@ data Def = Def Fun Int
 --data Fun = Fun (forall m. CashMonad m => [Val] -> m [Val])
 data Fun = FAdd | FSub | FMul | FDiv | FNot | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
+         | FCall | FBoth
 -- | FQuot [Act]
   deriving (Eq, Generic, Show)
 instance Hashable Fun

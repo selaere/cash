@@ -1,7 +1,7 @@
 module Rt where
 import Parse (Tok(..), Obj(..), Ident, Position(..), formatLine)
 import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem(..), Act(..), Fun)
-import Arr (pattern Atom, asElem, list)
+import Arr (pattern Atom, asElem, list, unwrap)
 import qualified Control.Monad.Trans.State as S
 import qualified Data.HashMap.Strict as HM
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -14,6 +14,7 @@ import Prim (exec)
 import Control.Lens ((%=), Traversal', use, at, (.=))
 import Data.Maybe (fromMaybe)
 import System.Exit (exitFailure)
+import Control.Monad (foldM)
 
 data RtState = RtState { stacks :: HM.HashMap Ident [Val]
                        , defs   :: HM.HashMap Ident Def
@@ -23,14 +24,14 @@ defaultRtState :: RtState
 defaultRtState = RtState { stacks = HM.empty, defs = primitives, sources = HM.empty }
 
 primitives :: HM.HashMap Ident Def
-primitives = HM.fromList $ map (\(x,y,z) -> (T.pack x, Def y z))
+primitives = (HM.fromList . map \(x,y,z) -> (T.pack x, Def y z))
   [ ("+", Val.FAdd,     0)
   , ("-", Val.FSub,     0)
   , ("*", Val.FMul,     0)
   , ("/", Val.FDiv,     0)
   , ("~", Val.FNot,     0)
   , ("'", Val.FCat,     0)
-  , ("`", Val.FCons,    0)
+  , ("\"",Val.FCons,    0)
   , ("E", Val.FReshape, 0)
   , ("s#",Val.FShape,   0)
   , ("!", Val.FDrop,    0)
@@ -38,7 +39,9 @@ primitives = HM.fromList $ map (\(x,y,z) -> (T.pack x, Def y z))
   , (",", Val.FSwap,    0)
   , (";", Val.FRot,     0)
   , (":", Val.FOver,    0)
-  , ("\"",Val.FShow,    0)
+  , ("`", Val.FShow,    0)
+  , ("^", Val.FCall,    0)
+  , ("b", Val.FBoth,    1)
   ]
 
 _stacks  :: Traversal' RtState (HM.HashMap Ident [Val])
@@ -57,6 +60,7 @@ instance CashMonad RtM where
   cashError err = (showErr err >>= cashLog) >> liftIO exitFailure
   effect = liftIO . doEffect
   source name = use (_sources.at name)
+  callQuot = call
 
 showErrSrcd :: CashMonad m => RtErr -> m String
 showErrSrcd (WithOffset (Position name offset) err) =
@@ -77,6 +81,7 @@ data RtErr
   | VarNotThere Ident
   | UnfCombinator Fun [[Act]]
   | WithOffset Position RtErr
+  | MisshapenQuot [Int]
   deriving (Eq, Show)
 
 instance Error RtErr where
@@ -130,16 +135,21 @@ cutQuot defs (Tok loc (QuotUnf a) : os) = first (WithOffset loc) ((,os) <$> read
 cutQuot defs a                          = first singleton <$> cutAct defs a
 
 cutAct' :: HM.HashMap Ident Def -> Obj -> [Tok] -> Either RtErr (Act, [Tok])
-cutAct' defs (Cmd ident) os =
-  case HM.lookup ident defs of
-    Just (Def call arity) -> readQuotN defs ([], os) arity <&> first (Comb call)
-    Nothing               -> Left (CmdNotFound ident)
+cutAct' defs (Cmd ident) os 
+  | T.last ident == '^' && T.length ident > 1 =
+    case HM.lookup (T.init ident) defs of
+      Just (Def call _rity) -> Right (Comb call [], os)
+      Nothing               -> Left (CmdNotFound ident)
+  | otherwise =
+    case HM.lookup ident defs of
+      Just (Def call arity) -> readQuotN defs ([], os) arity <&> first (Comb call)
+      Nothing               -> Left (CmdNotFound ident)
 cutAct' _efs (Numlit i) os   = Right (Const (Nums (Atom (toRational i))), os)
 cutAct' _efs (LitLabel l) os = Right (Const (Symbols (Atom (Val.Symbol l))), os)
 cutAct' defs (QuotF a) os = (,os) . Const . placeholderActsToVal <$> readQuot defs a
 cutAct' defs (QuotUnf a) os = cutAct' defs (QuotF a) os
-cutAct' _efs (Literal i t) os | T.null i = Right (Const (list (EChar <$> T.unpack t)), os)
-                               | otherwise= Left (PatNotFound i)
+cutAct' _efs (Literal i t) os | T.null i  = Right (Const (list (EChar <$> T.unpack t)), os)
+                              | otherwise = Left (PatNotFound i)
 cutAct' _efs (OPush i) os = Right (Push i, os)
 cutAct' _efs (OPeek i) os = Right (Peek i, os)
 cutAct' _efs (OPop  i) os = Right (Pop  i, os)
@@ -152,8 +162,13 @@ readQuot :: HM.HashMap Ident Def -> [Tok] -> Either RtErr [Act]
 readQuot _    [] = Right []
 readQuot defs a  = cutAct defs a >>= \(c, xs) -> (c:) <$> readQuot defs xs
 
-
 readQuotN :: HM.HashMap Ident Def -> ([[Act]], [Tok]) -> Int -> Either RtErr ([[Act]], [Tok])
 readQuotN _    (cs, os) 0 = Right (cs, os)
 readQuotN defs (cs, os) k = cutQuot defs os >>= \(c, os')-> readQuotN defs (c:cs, os') (k-1)
 
+call :: [Elem] -> [Val] -> RtM [Val]
+call os xs = foldM (flip doElem) xs os
+
+doElem :: Elem -> [Val] -> RtM [Val]
+doElem (ECmd a) xs = doAct a xs
+doElem a xs = pure (unwrap a : xs)

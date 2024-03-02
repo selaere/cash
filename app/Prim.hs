@@ -1,7 +1,7 @@
 module Prim where
 
 import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..))
-import Arr (scalar, biscalar, catenate, construct, asAxes, reshape, agree, axesToVal, shape, spec)
+import Arr (scalar, biscalar, catenate, construct, asAxes, reshape, agree, axesToVal, shape, spec, forceQuot)
 import qualified Data.Text as T
 import Data.Functor (($>))
 
@@ -58,6 +58,9 @@ mo0 :: CashMonad m => (Val -> m ()) -> [Val] -> m [Val]
 mo0 f (x:xs) = f x $> xs
 mo0 _ xs     = udf 1 xs
 
+call :: CashMonad m => Val -> [Val] -> m [Val]
+call = callQuot . forceQuot
+
 exec :: CashMonad m => Fun -> [Val] -> m [Val]
 exec FAdd = bi (ufbinum (+))
 exec FSub = bi (ufbinum (-))
@@ -74,3 +77,7 @@ exec FSwap = \case   (y:x:xs) -> pure   (x:y:xs) ; xs -> udf 2 xs
 exec FRot  = \case (z:y:x:xs) -> pure (x:z:y:xs) ; xs -> udf 3 xs
 exec FOver = \case   (y:x:xs) -> pure (y:x:y:xs) ; xs -> udf 2 xs
 exec FShow = mo0 (cashLog . Output . T.pack . show)
+exec FCall = \case (x:xs) -> callQuot (forceQuot x) xs
+                   xs     -> udf 1 xs
+exec FBoth = \case (q:z:y:xs) -> do xs' <- call q (z:xs); call q (y:xs')
+                   xs         -> udf 4 xs

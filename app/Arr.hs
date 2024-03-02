@@ -348,6 +348,11 @@ deshape = tmapq deshapel id
 deshapel :: L a => Arr a -> Arr a
 deshapel (Arr sh a) = Arr [Ixd (axesSize sh)] a
 
+flattenToList :: L a => Arr a -> [a]
+flattenToList (Arr sh a) = take (axesSize sh) (V.toList a)
+
+forceQuot :: Val -> [Elem]
+forceQuot = tapq (fmap ltoelem . flattenToList) id
 
 construct :: Val -> Val -> Maybe Val
 construct (Quot a) b = Just (Quot (asElem b : a))

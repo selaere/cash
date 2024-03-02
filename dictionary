@@ -1,5 +1,5 @@
 ! drop
-" show/lit  "
+" cons?  "
 # length
 $ label/var
 % mod
@@ -21,7 +21,7 @@ $ label/var
 \ or
 ^ call/comb
 _ in_ident, neg _123, _ line comment
-` cons?
+` show/lit
 { >r
 | r@
 } r>
