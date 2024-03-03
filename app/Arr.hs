@@ -248,7 +248,7 @@ scalar f a = tfmapb (traverseA f) a
 
 biscalar :: forall m c . Applicative m => L c
          => m Val   -- mismatched axes error value
-         -> (forall a b . (L a, L b) => a -> b -> m c)
+         -> (forall a b. (L a, L b) => a -> b -> m c)
          -> Val -> Val -> m Val
 biscalar err f (Elems a) (Elems b) =
   maybe err (fmap atoval) (lazip1 f' a b)

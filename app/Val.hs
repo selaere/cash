@@ -7,7 +7,7 @@ import qualified Data.Vector as VB
 import qualified Data.Vector.Unboxed as VU
 import qualified Data.Vector.Generic as V
 import qualified Data.HashMap.Strict as HM
-import Data.Hashable (Hashable (..))
+import Data.Hashable (Hashable(..))
 import Parse (Ident)
 import Data.Kind (Type)
 import Data.Int (Int64)
@@ -149,8 +149,9 @@ instance Error ValErr where
   errAsVal = undefined
 
 type Vec a = VecL a a
-class (V.Vector (VecL a) a, Eq a, Show a, Eq (Vec a), Show (Vec a)) => L a where
 
+class (V.Vector (VecL a) a, Eq a, Show a, Eq (Vec a), Show (Vec a)) => L a where
+  
   type VecL a :: Type -> Type
   ltoelem :: L a => a -> Elem
   atoval  :: L a => Arr a -> Val

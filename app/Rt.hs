@@ -24,7 +24,7 @@ defaultRtState :: RtState
 defaultRtState = RtState { stacks = HM.empty, defs = primitives, sources = HM.empty }
 
 primitives :: HM.HashMap Ident Def
-primitives = (HM.fromList . map \(x,y,z) -> (T.pack x, Def y z))
+primitives = (HM.fromList . map \(x,y,z) -> (x, Def y z))
   [ ("+", Val.FAdd,     0)
   , ("-", Val.FSub,     0)
   , ("*", Val.FMul,     0)
@@ -62,14 +62,14 @@ instance CashMonad RtM where
   source name = use (_sources.at name)
   callQuot = call
 
-showErrSrcd :: CashMonad m => RtErr -> m String
+showErrSrcd :: CashMonad m => RtErr -> m T.Text
 showErrSrcd (WithOffset (Position name offset) err) =
   (<>) . \case
     Just src -> formatLine src name offset
-    Nothing  -> "at file "<>show name<>" (unavailable)\n"
+    Nothing  -> "at file "<>T.pack (show name)<>" (unavailable)\n"
   <$> source name
   <*> showErrSrcd err
-showErrSrcd err = pure (show err <> "\n")
+showErrSrcd err = pure (T.pack (show err) <> "\n")
 
 
 
@@ -85,7 +85,7 @@ data RtErr
   deriving (Eq, Show)
 
 instance Error RtErr where
-  showErr err = Output . T.pack <$> showErrSrcd err
+  showErr err = Output <$> showErrSrcd err
   errAsVal = undefined
 
 placeholderActsToVal :: [Act] -> Val

@@ -6,11 +6,10 @@ import Data.Text (Text)
 import qualified Data.Char as Char
 import Text.Megaparsec.Char (space1)
 import Text.Megaparsec.Char.Lexer (decimal)
-import qualified Data.Text as Text
+import qualified Data.Text as T
 import Control.Monad (void, guard)
 import Control.Applicative ((<**>))
 import Data.Functor ((<&>))
-import Data.Maybe (fromMaybe)
 import Text.Megaparsec.State (initialPosState)
 
 type Parser = Parsec Void Text
@@ -52,16 +51,16 @@ data Tok = Tok !Position Obj
 
 
 parseLit :: Parser Text
-parseLit = single '[' *> (Text.concat <$> many things) <* (void (single ']') <|> eof)
+parseLit = single '[' *> (T.concat <$> many things) <* (void (single ']') <|> eof)
   where
     things = (takeWhile1P Nothing \x-> x /= ']' && x /= '[')
-      <|> (Text.cons '[' . flip Text.snoc ']' <$> parseLit)
+      <|> (T.cons '[' . flip T.snoc ']' <$> parseLit)
 
 parseIdent :: Parser Obj
 parseIdent = do
   a <- takeWhileP (Just "continuation character") isContinuation
   b <- choice
-    [ guard (not (Text.null a))
+    ([ guard (not (T.null a))
       *> (Cmd <$ lookAhead
         (void (single '(') <|> void (single ')') <|> space1 <|> void eof))
     , flip Literal <$> parseLit
@@ -69,8 +68,8 @@ parseIdent = do
         '{' -> OPush
         '|' -> OPeek
         '}' -> OPop
-        x   -> Cmd . flip Text.snoc x
-      <$> ending ]
+        x   -> Cmd . flip T.snoc x
+      <$> ending ] :: [Parser (Ident -> Obj)])
   pure (b a)
   where
     ending = label "ending character" (satisfy \x ->
@@ -82,14 +81,14 @@ getPosition = getParserState <&> \x ->
 
 parseTok :: Parser Tok
 parseTok = Tok <$> getPosition <*> choice
-  [ Numlit <$> decimal
+  ([ Numlit <$> decimal
   , (single '$' *> parseIdent) >>= \case
       Cmd name -> return (LitLabel name)
       _        -> fail "?xyz[] is invalid"
   , single '(' *> sc *> many parseTok
     <**> (QuotF <$ single ')' <|> QuotUnf <$ eof)
   , parseIdent
-  ] <* sc
+  ] :: [Parser Obj]) <* sc
 
 parseFile :: Parser [Tok]
 parseFile = sc *> many parseTok <* eof
@@ -99,7 +98,7 @@ parse filename input = case runParser parseFile filename input of
   Left errorbundle -> putStrLn (errorBundlePretty errorbundle) >> fail "owie"
   Right val -> pure val
 
-formatLine :: Text -> FilePath -> Int -> String
+formatLine :: Text -> FilePath -> Int -> Text
 formatLine src name n =
   let (line, pos) = reachOffset n (initialPosState name src)
-  in "at "<>sourcePosPretty (pstateSourcePos pos)<>"\n  |"<>fromMaybe "" line<>"\n"
+  in "at "<>T.pack (sourcePosPretty (pstateSourcePos pos))<>"\n  |"<>T.pack (concat line)<>"\n"
