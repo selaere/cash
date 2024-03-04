@@ -158,9 +158,9 @@ spec f = go f . ltoelem
         go f (EPath   x) = f x
         go f x           = f x
 
-agree :: (Applicative m, L c, L d) =>
-         (forall a. L a => a -> a -> m b) ->
-         c -> d -> m b
+agree :: (L c, L d) =>
+         (forall a. L a => a -> a -> b) ->
+         c -> d -> b
 agree f a b = agreeElem f (ltoelem a) (ltoelem b)
 
 firstCell :: Val -> Maybe Val
@@ -229,6 +229,13 @@ birankL :: (Applicative m, L a, L b, L c)
         -> Arr a -> Arr b -> Maybe (m (Arr c))
 birankL r r' newsh f a b = birankRel (rankNumber a r) (rankNumber b r') newsh f a b
 
+-- where `lazip1 f` <-> `lazip [] (V.singleton .: f)`
+lazip1 :: (Applicative m, L a, L b, L c)
+       => (a -> b -> m c)
+       -> Arr a -> Arr b -> Maybe (m (Arr c))
+lazip1 f (Arr sh a) (Arr sh' b) =
+  leadingAxis sh sh' <&> \(nlsh, i, i')->
+    Arr nlsh . V.fromListN (axesSize nlsh) <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
 
 lazip :: (Applicative m, L a, L b, L c)
       => [Axis] -> (a -> b -> m (Vec c))
@@ -236,9 +243,6 @@ lazip :: (Applicative m, L a, L b, L c)
 lazip nrsh f (Arr sh a) (Arr sh' b) =
   leadingAxis sh sh' <&> \(nlsh, i, i')->
     Arr (nlsh <> nrsh) . V.concat <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
-
-lazip1 :: (Applicative m, L a, L b, L c) => (a -> b -> m c) -> Arr a -> Arr b -> Maybe (m (Arr c))
-lazip1 f = lazip [] (fmap V.singleton .: f)
 
 scalar :: L b => Applicative m => (forall a. L a => a -> m b) -> Val -> m Val
 scalar f (Elems a) = Elems <$> traverseA go a

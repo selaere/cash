@@ -12,7 +12,6 @@ import Parse (Ident)
 import Data.Kind (Type)
 import Data.Int (Int64)
 import Data.Ratio (numerator, denominator)
-import Data.Function (on)
 
 
 infixr 8 .:
@@ -91,7 +90,7 @@ hashArr s (Arr sh a) = s `hashWithSalt` sh `hashWithSalt` V.toList a
 
 data Output = Output T.Text
             | OutputRed T.Text
-            
+
 newtype Path = Path T.Text
 
 class Effect e o | e -> o where
@@ -151,16 +150,12 @@ instance Error ValErr where
 type Vec a = VecL a a
 
 class (V.Vector (VecL a) a, Eq a, Show a, Eq (Vec a), Show (Vec a)) => L a where
-  
+
   type VecL a :: Type -> Type
   ltoelem :: L a => a -> Elem
   atoval  :: L a => Arr a -> Val
   lshow :: L a => a -> String
 
-  math :: (L a, CashMonad m) => (forall x y. (Num x, Num y) => x -> m y) -> a -> m a
-  math _ a = cashError (NotANumber (ltoelem a))
-  math2 :: (L a, CashMonad m) => (forall x y z. (Num x, Num y, Num z) => x -> y -> m z) -> a -> a -> m a
-  math2 _ a b = cashError (on NotANumber2 ltoelem a b)
   toRat :: L a => a -> Maybe Rational
   toRat _ = Nothing
 
@@ -178,8 +173,6 @@ instance L Int64 where
   ltoelem  = ENum . toRational
   atoval   = Ints
   lshow    = show
-  math     f = f
-  math2    f = f
   toRat = Just . toRational
 
 instance L Rational where
@@ -189,8 +182,6 @@ instance L Rational where
   lshow x  | d == 1 = show n
            | otherwise = show n <> "/" <> show d
     where n = numerator x ; d = denominator x
-  math     f = f
-  math2    f = f
   toRat = Just
 
 instance L Char where
@@ -198,8 +189,6 @@ instance L Char where
   ltoelem  = EChar
   atoval   = Chars
   lshow    = show
-  math  f = fmap toEnum .  f  . fromEnum
-  math2 f = fmap toEnum .: on f fromEnum
 
 instance L Symbol where
   type VecL Symbol = VB.Vector
