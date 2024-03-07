@@ -1,6 +1,6 @@
 module Prim where
 
-import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..), ValErr(..))
+import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..), Elem(..))
 import Arr (agree, asAxes, asElem, axesToVal, biscalar, catenate, construct, fmapArr, forceQuot
           , lazip1, reshape, scalar, shape, spec)
       --  ^ randome comma
@@ -21,6 +21,8 @@ data PrimError
   | MismatchingAxes
   | Underflow Int Int
   | ShapeError
+  | NotANumber Elem
+  | NotANumber2 Elem Elem
   deriving (Eq, Show)
 
 instance Error PrimError where
@@ -48,14 +50,6 @@ monum f = scalar (spec (mathRat f))
 binum :: CashMonad m => (Rational -> Rational -> m Rational) -> Val -> Val -> m Val
 binum f = biscalar (cashError MismatchingAxes) (agree (mathRat2 f))
 
-
-
---bimath :: L y => CashMonad m => (forall x y. (Num x) => x -> x -> m y) -> Val -> Val -> m Val
---bimath f = _ (agree (math2 (pure .: f)))--biscalar (cashError MismatchingAxes) (agree (math2 (pure .: f)))
---bimath :: CashMonad m => Val -> Val -> m Val
---bimath = biscalar (cashError MismatchingAxes) (agree (math2 (pure .: f)))
-
-
 overflowingOp :: forall m. CashMonad m => (forall a. Num a => a->a->a) -> Val -> Val -> m Val
 overflowingOp op = go
   where
@@ -78,9 +72,6 @@ overflowingOp op = go
       maybe (cashError MismatchingAxes) (pure . Nums . coerce) (lazip1 (Identity .: op) a b)
     go a b@(Nums _) = cashError (on NotANumber2 asElem b a)
     go a b          = cashError (on NotANumber2 asElem a b)
-
-
-
 
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)

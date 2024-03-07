@@ -140,13 +140,6 @@ data Fun = FAdd | FSub | FMul | FDiv | FNot | FCat | FCons | FReshape | FShape
   deriving (Eq, Generic, Show)
 instance Hashable Fun
 
-data ValErr = NotANumber Elem | NotANumber2 Elem Elem
-  deriving (Eq, Show)
-
-instance Error ValErr where
-  showErr x = pure (Output (T.pack (show x)))
-  errAsVal = undefined
-
 type Vec a = VecL a a
 
 class (V.Vector (VecL a) a, Eq a, Show a, Eq (Vec a), Show (Vec a)) => L a where
