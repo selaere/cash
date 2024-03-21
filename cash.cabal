@@ -73,6 +73,7 @@ executable cash
         FunctionalDependencies,
         TypeFamilies,
         OverloadedStrings,
+        MagicHash,
 
     -- Other library packages from which modules are imported.
     build-depends:

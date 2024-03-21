@@ -29,7 +29,7 @@ list = atoval . listl
 listl :: L a => [a] -> Arr a
 listl = vecl . V.fromList
 
-vec :: Vec Elem -> Val
+vec :: L a => Vec a -> Val
 vec = atoval . vecl
 
 vecl :: L a => Vec a -> Arr a
@@ -139,7 +139,7 @@ tagree f (Chars   x) (Chars   y) = f x y
 tagree f (Symbols x) (Symbols y) = f x y
 tagree f (Paths   x) (Paths   y) = f x y
 tagree f (Elems   x) (Elems   y) = f x y
-tagree f x y = on f (tap (fmapArr ltoelem)) x y
+tagree f x y = on f asElems x y
 
 agreeElem :: (forall a. L a => a -> a -> b) -> Elem -> Elem -> b
 agreeElem f (ENum    x) (ENum    y) = f x y
@@ -357,6 +357,9 @@ flattenToList (Arr sh a) = take (axesSize sh) (V.toList a)
 
 forceQuot :: Val -> [Elem]
 forceQuot = tapq (fmap ltoelem . flattenToList) id
+
+asElems :: Val -> Arr Elem
+asElems = tap (fmapArr ltoelem)
 
 construct :: Val -> Val -> Maybe Val
 construct (Quot a) b = Just (Quot (asElem b : a))
