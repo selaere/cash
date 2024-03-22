@@ -131,15 +131,15 @@ tzipb :: L b => Functor f => (forall a. L a => Arr a -> Arr a -> f (Arr b)) -> V
 tzipb f = tagree (fmap atoval .: f)
 
 tagree :: (forall a. L a => Arr a -> Arr a -> b) -> Val -> Val -> b
-tagree f (Ints    x) (Ints    y) = f x y
-tagree f (Ints    x) (Nums    y) = f (fmapArr toRational x) y
-tagree f (Nums    x) (Ints    y) = f x (fmapArr toRational y)
-tagree f (Nums    x) (Nums    y) = f x y
-tagree f (Chars   x) (Chars   y) = f x y
-tagree f (Symbols x) (Symbols y) = f x y
-tagree f (Paths   x) (Paths   y) = f x y
-tagree f (Elems   x) (Elems   y) = f x y
-tagree f x y = on f asElems x y
+tagree f (Ints    a) (Ints    b) = f a b
+tagree f (Ints    a) (Nums    b) = f (fmapArr toRational a) b
+tagree f (Nums    a) (Ints    b) = f a (fmapArr toRational b)
+tagree f (Nums    a) (Nums    b) = f a b
+tagree f (Chars   a) (Chars   b) = f a b
+tagree f (Symbols a) (Symbols b) = f a b
+tagree f (Paths   a) (Paths   b) = f a b
+tagree f (Elems   a) (Elems   b) = f a b
+tagree f a b = on f asElems a b
 
 agreeElem :: (forall a. L a => a -> a -> b) -> Elem -> Elem -> b
 agreeElem f (ENum    x) (ENum    y) = f x y
@@ -309,18 +309,21 @@ isScalar (EBox _) = True
 isScalar _        = False
 
 enclose :: Val -> Val
-enclose x = Elems ( Atom (asElem x))
+enclose x = Elems (Atom (asElem x))
 
 asElem :: Val -> Elem
 asElem c@(Elems (Atom _)) = EBox c
-asElem x = tap go x
-  where go (Atom e) = ltoelem e
+asElem a = tap go a
+  where go (Atom x) = ltoelem x
         go a = EBox (atoval a)
 
 unwrap :: Elem -> Val
 unwrap (EBox a) = a
 unwrap a        = Elems (Atom a)
 
+isTrue :: L a => a -> Maybe Bool
+isTrue x = (0 /=) <$> toRat x
+{-# INLINE isTrue #-}
 
 asAxes :: Val -> Maybe [Axis]
 asAxes = tap asAxesL
@@ -412,7 +415,6 @@ indexElementL is (Arr sh a) =
     (Nmd (Bivector _ ie))  (Right i) -> HM.lookup i ie
   sh is
   <&> \indices-> a V.! (sum . zipWith (*) indices . tail . scanr (*) 1 . map axisLength) sh
-
 
 shortShowL :: L a => Arr a -> String
 shortShowL (Atom a) = lshow a
