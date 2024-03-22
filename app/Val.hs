@@ -133,7 +133,9 @@ data Def = Def Fun Int
   deriving (Eq, Generic, Show)
 
 --data Fun = Fun (forall m. CashMonad m => [Val] -> m [Val])
-data Fun = FAdd | FSub | FMul | FDiv | FNot | FCat | FCons | FReshape | FShape
+data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
+         | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
+         | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
          | FCall | FBoth
 -- | FQuot [Act]

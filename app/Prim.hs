@@ -9,6 +9,8 @@ import Data.Functor (($>))
 import Data.Function (on)
 import Data.Int (Int64)
 import Control.Monad (guard, when, join)
+import Data.Ratio (numerator, denominator)
+import GHC.Real ((%))
 
 
 infixr 8 .:
@@ -23,6 +25,7 @@ data PrimError
   | NotANumber Elem
   | NotANumber2 Elem Elem
   | CharOverflow
+  | CharRational
   deriving (Eq, Show)
 
 instance Error PrimError where
@@ -56,40 +59,102 @@ lazipMCash :: (CashMonad m, Applicative n, L a, L b, L c) =>
               (a -> b -> n c) -> Arr a -> Arr b -> m (n (Arr c))
 lazipMCash f a b = maybe (cashError MismatchingAxes) pure (lazip1 f a b)
 
-overflowingOp :: forall m. CashMonad m =>
-                 (forall a. Num a => a->a->a) -> Val -> Val -> m Val
-overflowingOp op = go
+
+overflow :: (forall a. Integral a => a->a->a) -> Int64 -> Int64 -> Maybe Int64
+overflow op x y = --nitnendo
+  let !z = op (toInteger x) (toInteger y) in
+  guard (toInteger (minBound::Int64) <= z && z <= toInteger (maxBound::Int64))
+  $> fromInteger z
+ 
+affineOp :: forall m. CashMonad m =>
+                 (Rational->Rational->Rational) -> (Int64->Int64->Maybe Int64) -> Val -> Val -> m Val
+affineOp op op64 = go
   where
     go :: Val -> Val -> m Val
     go (Ints a) (Ints b) =
-      lazipMCash go64 a b >>= \case
+      lazipMCash op64 a b >>= \case
         Just c  -> pure (Ints c)
         Nothing -> Nums <$> lazipCash (pure .: op `on` toRational) a b
     go (Nums a) (Nums b) = Nums <$> lazipCash (pure.:op) a b
     go (Chars a) (Ints  b) = Chars <$> lazipCash goChr a b
     go (Ints  a) (Chars b) = Chars <$> lazipCash goChr a b
+    go (Chars a) (Chars b) = Chars <$> lazipCash goChr a b
+    go (Chars a) (Nums  b) = Chars <$> lazipCash (\x y-> assertInt y *> goChr x y) a b
+    go (Nums  a) (Chars b) = Chars <$> lazipCash (\x y-> assertInt x *> goChr x y) a b
+    go (Ints a) (Nums b) = Nums <$> lazipCash (pure.: \x y-> op (toRational x) y) a b
+    go (Nums a) (Ints b) = Nums <$> lazipCash (pure.: \x y-> op x (toRational y)) a b
+    go a b = Elems <$> (lazipCash goElem `on` asElems) a b
+
+    assertInt x = when (denominator x /= 1) (cashError CharRational)
+
+    goChr :: (Enum a, Enum b) => a -> b -> m Char
+    goChr x y =
+      case op64 (toEnum (fromEnum x)) (toEnum (fromEnum y)) of
+        Just z | 0 <= z && z <= 0x10FFFF -> pure (toEnum (fromEnum z))
+               | otherwise               -> cashError CharOverflow
+        Nothing -> cashError CharOverflow
+
+    goElem :: Elem -> Elem -> m Elem
+    goElem (ENum a) (ENum b) = pure (ENum (op a b))
+    goElem (EBox a) (ENum b) = EBox <$> go a (Nums (Atom b))
+    goElem (ENum a) (EBox b) = EBox <$> go (Nums (Atom a)) b
+    goElem (EBox a) (EBox b) = EBox <$> go a b
+    goElem (EChar a) (ENum  b) = do assertInt b; EChar <$> goChr a b
+    goElem (ENum  a) (EChar b) = do assertInt a; EChar <$> goChr a b
+    goElem (EChar a) (EChar b) =                 EChar <$> goChr a b
+    goElem a b = cashError (NotANumber2 a b)
+
+compOp :: forall m. CashMonad m =>
+          --(Rational->Rational->Int64) -> (Int64->Int64->Int64) -> (Char->Char->Int64) ->
+          (forall n. (Enum n, Ord n) => n->n->Int64) ->
+          Val -> Val -> m Val
+compOp op = go
+  where
+    go :: Val -> Val -> m Val
+    go (Ints a) (Ints b) = Ints <$> lazipCash (pure.:op) a b
+    go (Nums a) (Nums b) = Ints <$> lazipCash (pure.:op) a b
+    go (Chars a) (Chars b) = Ints <$> lazipCash (pure.:op) a b
     go (Ints a)      b  = go   (Nums (fmapArr toRational a)) b
     go       a (Ints b) = go a (Nums (fmapArr toRational b))
     go a b = Elems <$> (lazipCash goElem `on` asElems) a b
 
-    go64 :: Int64 -> Int64 -> Maybe Int64
-    go64 x y = --nitnendo
-      let !z = op (toInteger x) (toInteger y) in
-      guard (toInteger (minBound::Int64) <= z && z <= toInteger (maxBound::Int64))
-      $> fromInteger z
+    goElem :: Elem -> Elem -> m Elem
+    goElem (ENum a)  (ENum b)  = pure (ENum (toRational (op a b)))
+    goElem (EChar a) (EChar b) = pure (ENum (toRational (op a b)))
+    goElem (EBox a)  (ENum b)  = EBox <$> go a (Nums (Atom b))
+    goElem (ENum a)  (EBox b)  = EBox <$> go (Nums (Atom a)) b
+    goElem (EBox a)  (EBox b)  = EBox <$> go a b
+    goElem a b = cashError (NotANumber2 a b)
 
-    goChr :: (Enum a, Enum b) => a -> b -> m Char
-    goChr x y =
-      let !z = op (toInteger (fromEnum x)) (toInteger (fromEnum y)) in
-      when (0 <= z && z <= 0x10FFFF) (cashError CharOverflow)
-      $> toEnum (fromInteger z)
+overflowingOp :: forall m. CashMonad m =>
+                 (Rational->Rational->Rational) -> (Int64->Int64->Maybe Int64)
+                 -> Val -> Val -> m Val
+overflowingOp op op64 = go
+  where
+    go :: Val -> Val -> m Val
+    go (Ints a) (Ints b) =
+      lazipMCash op64 a b >>= \case
+        Just c  -> pure (Ints c)
+        Nothing -> Nums <$> lazipCash (pure .: op `on` toRational) a b
+    go (Nums a) (Nums b) = Nums <$> lazipCash (pure.:op) a b
+    go (Ints a) (Nums b) = Nums <$> lazipCash (pure.: \x y-> op (toRational x) y) a b
+    go (Nums a) (Ints b) = Nums <$> lazipCash (pure.: \x y-> op x (toRational y)) a b
+    go a b = Elems <$> (lazipCash goElem `on` asElems) a b
 
     goElem :: Elem -> Elem -> m Elem
     goElem (ENum a) (ENum b) = pure (ENum (op a b))
-    goElem (EBox a) (ENum b) = EBox <$> overflowingOp op a (Nums (Atom b))
-    goElem (ENum a) (EBox b) = EBox <$> overflowingOp op (Nums (Atom a)) b
-    goElem (EBox a) (EBox b) = EBox <$> overflowingOp op a b
+    goElem (EBox a) (ENum b) = EBox <$> go a (Nums (Atom b))
+    goElem (ENum a) (EBox b) = EBox <$> go (Nums (Atom a)) b
+    goElem (EBox a) (EBox b) = EBox <$> go a b
     goElem a b = cashError (NotANumber2 a b)
+
+staticOp :: forall m. CashMonad m =>
+            (forall n. Real n => n->n->n)
+            -> Val -> Val -> m Val
+staticOp op = overflowingOp op (pure .: op)
+
+bool :: Bool -> Int64
+bool = toEnum . fromEnum
 
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
@@ -117,11 +182,30 @@ mo0 _ xs     = udf 1 xs
 call :: CashMonad m => Val -> [Val] -> m [Val]
 call = callQuot . forceQuot
 
+quotS :: Int64 -> Int64 -> Maybe Int64
+quotS x y | x == maxBound && y /= -1 = Nothing
+          | otherwise                = Just (x `quot` y)
+
+powr :: Rational -> Rational -> Rational
+powr x y | denominator y == 1 = x^numerator y
+         | otherwise          = toRational (on (**) fromRational x y :: Double)
+
+
 exec :: CashMonad m => Fun -> [Val] -> m [Val]
-exec FAdd = bi (overflowingOp (+))
-exec FSub = bi (overflowingOp (-))
-exec FMul = bi (overflowingOp (*))
+exec FAdd = bi (affineOp (+) (overflow (+)))
+exec FSub = bi (affineOp (-) (overflow (-)))
+exec FMul = bi (overflowingOp (*) (overflow (*)))
 exec FDiv = bi (ufbinum (/))
+exec FLt  = bi (compOp (bool.:(<)) )
+exec FEq  = bi (compOp (bool.:(==)))
+exec FGt  = bi (compOp (bool.:(>)) )
+exec FDivi= bi (overflowingOp (\x y->floor (x/y) % 1) quotS)
+exec FMod = bi (overflowingOp (\x y-> x-y*(floor (x/y) % 1)) (Just .: rem))
+exec FPow = bi (overflowingOp powr (overflow (^)))
+exec FMax = bi (staticOp max)
+exec FMin = bi (staticOp min)
+exec FAnd = bi (staticOp (\cases 0 _ -> 0; _ y -> y))
+exec FOr  = bi (staticOp (\cases 0 y -> y; x _ -> x))
 exec FNot = mo (ufmonum (toRational . fromEnum . (== 0)))
 exec FCat  = bi (fromMaybeErr ShapeError .: catenate)
 exec FCons = bi (fromMaybeErr ShapeError .: construct)
@@ -135,5 +219,5 @@ exec FOver = \case   (y:x:xs) -> pure (y:x:y:xs) ; xs -> udf 2 xs
 exec FShow = mo0 (cashLog . Output . T.pack . show)
 exec FCall = \case (x:xs) -> callQuot (forceQuot x) xs
                    xs     -> udf 1 xs
-exec FBoth = \case (q:z:y:xs) -> do xs' <- call q (z:xs); call q (y:xs')
+exec FBoth = \case (q:z:y:xs) -> do xs' <- call q (y:xs); call q (z:xs')
                    xs         -> udf 4 xs
