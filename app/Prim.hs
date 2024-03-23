@@ -2,15 +2,17 @@ module Prim where
 
 import Val (Val(..), CashMonad(..), Output(..), Error(..), Fun(..), L(..), Elem(..), Arr)
 import Arr (agree, asAxes, asElems, axesToVal, biscalar, catenate, construct, forceQuot
-          , lazip1, reshape, scalar, shape, spec, pattern Atom, tap, fmapArr)
+          , lazip1, reshape, scalar, shape, spec, pattern Atom, tap, fmapArr, valIsTrue, unwrapAtom)
       --  ^ randome comma
 import qualified Data.Text as T
 import Data.Functor (($>), (<&>))
 import Data.Function (on)
 import Data.Int (Int64)
-import Control.Monad (guard, join)
+import Control.Monad (guard, join, (>=>), foldM)
 import Data.Ratio (numerator, denominator)
 import GHC.Real ((%))
+import Control.Arrow ((>>>))
+import GHC.Base (when)
 
 
 infixr 8 .:
@@ -24,8 +26,11 @@ data PrimError
   | ShapeError
   | NotANumber Elem
   | NotANumber2 Elem Elem
+  | NotANumberV Val
+  | NotANumberV2 Val Val
   | CharOverflow
   | CharRational
+  | NotAnInteger Rational
   deriving (Eq, Show)
 
 instance Error PrimError where
@@ -43,7 +48,6 @@ mathRat f x = case toRat x of
 mathRat2 :: (L a, CashMonad m) => (Rational -> Rational -> m Rational) -> a -> a -> m Rational
 mathRat2 f x y = case (toRat x, toRat y) of
   (Just x, Just y ) -> f x y
-  (Just _, Nothing) -> cashError (on NotANumber2 ltoelem y x)
   (_, _)            -> cashError (on NotANumber2 ltoelem x y)
 
 monum :: CashMonad m => (Rational -> m Rational) -> Val -> m Val
@@ -58,7 +62,7 @@ lazipCash f = fmap atoval . join .: lazipMCash f
 
 lazipMCash :: (CashMonad m, Applicative n, L a, L b, L c) =>
               (a -> b -> n c) -> Arr a -> Arr b -> m (n (Arr c))
-lazipMCash f a b = maybe (cashError MismatchingAxes) pure (lazip1 f a b)
+lazipMCash f a b = fromMaybeErr MismatchingAxes (lazip1 f a b)
 
 -- detect binary function overflow in a generic way
 overflow :: (forall a. Integral a => a->a->a) -> Int64 -> Int64 -> Maybe Int64
@@ -148,7 +152,7 @@ sub = handleNumOverf (-) (overflow (-)) \cases
 -- "and" function. implemented specially because we dont need to match up the types.
 -- (the result of `x y&` is always the same type as x)
 and2 :: forall m. CashMonad m => Val -> Val -> m Val
-and2 a b = tap (flip go) b a >>= maybe (cashError NotNumber) pure
+and2 a b = tap (flip go) b a >>= fromMaybeErr NotNumber
   where
     go :: L b => Val -> Arr b -> m (Maybe Val)
     go (Elems a) b = Just <$> lazipCash goElem a (fmapArr ltoelem b)
@@ -183,7 +187,7 @@ or2 = handleNum op op \cases
     goElem (EChar '\0') y = pure y
     goElem (EBox x) y = EBox <$> or2 x (atoval (Atom y))
     goElem x _ = pure x
-    
+
 -- convenience. you cant define max and min in terms of this because of some type bullshit
 compOp :: forall m. CashMonad m =>
           (forall n. (Enum n, Ord n) => n->n->Int64) ->
@@ -231,19 +235,26 @@ ufmonum f = monum (pure . f)
 udf :: CashMonad m => Int -> [a] -> m b
 udf n = cashError . Underflow n . length
 
-bi :: CashMonad m => (Val -> Val -> m Val) -> [Val] -> m [Val]
-bi f (y:x:xs) = (:xs) <$> f x y
-bi _ xs       = udf 2 xs
+pop :: CashMonad m => [Val] -> m (Val,[Val])
+pop (x:xs) = pure (x,xs)
+pop []     = cashError (Underflow 1 0)
 
+pop2 :: CashMonad m => [Val] -> m (Val,Val,[Val])
+pop2 (x:y:xs) = pure (x,y,xs)
+pop2 xs       = cashError (Underflow 2 (length xs))
+
+pop3 :: CashMonad m => [Val] -> m (Val,Val,Val,[Val])
+pop3 (x:y:z:xs) = pure (x,y,z,xs)
+pop3 xs         = cashError (Underflow 3 (length xs))
+
+bi :: CashMonad m => (Val -> Val -> m Val) -> [Val] -> m [Val]
+bi f = pop2 >=> \(y,x,xs)-> (:xs) <$> f x y
 
 mo :: CashMonad m => (Val -> m Val) -> [Val] -> m [Val]
-mo f (x:xs) = (:xs) <$> f x
-mo _ xs     = udf 1 xs
-
+mo f = pop >=> \(x,xs)-> (:xs) <$> f x
 
 mo0 :: CashMonad m => (Val -> m ()) -> [Val] -> m [Val]
-mo0 f (x:xs) = f x $> xs
-mo0 _ xs     = udf 1 xs
+mo0 f = pop >=> \(x,xs)-> f x $> xs
 
 call :: CashMonad m => Val -> [Val] -> m [Val]
 call = callQuot . forceQuot
@@ -276,13 +287,30 @@ exec FCat  = bi (fromMaybeErr ShapeError .: catenate)
 exec FCons = bi (fromMaybeErr ShapeError .: construct)
 exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes y <*> pure x)
 exec FShape   = mo (pure . axesToVal . shape)
-exec FDrop = \case     (_:xs) -> pure        xs  ; xs -> udf 1 xs
-exec FDup  = \case     (x:xs) -> pure   (x:x:xs) ; xs -> udf 1 xs
-exec FSwap = \case   (y:x:xs) -> pure   (x:y:xs) ; xs -> udf 2 xs
-exec FRot  = \case (z:y:x:xs) -> pure (x:z:y:xs) ; xs -> udf 3 xs
-exec FOver = \case   (y:x:xs) -> pure (y:x:y:xs) ; xs -> udf 2 xs
+exec FDrop = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
+exec FDup  = pop  >>> fmap \    (x,xs)->   x:x:xs
+exec FSwap = pop2 >>> fmap \  (y,x,xs)->   x:y:xs
+exec FRot  = pop3 >>> fmap \(z,y,x,xs)-> x:z:y:xs
+exec FOver = pop2 >>> fmap \  (y,x,xs)-> y:x:y:xs
 exec FShow = mo0 (cashLog . Output . T.pack . show)
-exec FCall = \case (x:xs) -> callQuot (forceQuot x) xs
-                   xs     -> udf 1 xs
-exec FBoth = \case (q:z:y:xs) -> do xs' <- call q (y:xs); call q (z:xs')
-                   xs         -> udf 4 xs
+exec FCall = pop >=> uncurry call
+exec FBoth = pop3 >=> \(q,z,y,xs) -> do xs' <- call q (y:xs); call q (z:xs')
+exec FIf   = pop3 >=> \(q,p,c,xs) -> do c <- assertBool c; if c then call p xs else call q xs
+exec FDip  = pop2 >=> \(q,z,xs)-> do xs' <- call q    xs ; return (z:xs')
+exec FKeep = pop2 >=> \(q,z,xs)-> do xs' <- call q (z:xs); return (z:xs')
+exec FWhile = pop2 >=> while
+exec FTimes = pop2 >=> \(q,n,xs)->
+  do n <- fromMaybeErr (NotANumberV n) (unwrapAtom n >>= toRat)
+     when (denominator n /= 1) (cashError (NotAnInteger n))
+     foldM (\xs' ()-> call q xs') xs (replicate (fromEnum (numerator n)) ())
+
+while :: CashMonad m => (Val, Val, [Val]) -> m [Val]
+while (q,p,xs) = do
+    (c,xs') <- pop =<< call p xs
+    c <- assertBool c
+    if c then do xs'' <- call q xs'
+                 exec FWhile (p:q:xs'')
+         else return xs'
+
+assertBool :: CashMonad m => Val -> m Bool
+assertBool x = fromMaybeErr (NotANumberV x) (valIsTrue x )

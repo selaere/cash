@@ -137,7 +137,7 @@ data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
          | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
          | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
-         | FCall | FBoth
+         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes
 -- | FQuot [Act]
   deriving (Eq, Generic, Show)
 instance Hashable Fun

@@ -305,8 +305,8 @@ mergeRecordsL left (Bivector nms' _) sh a b =
 
 
 isScalar :: Elem -> Bool
-isScalar (EBox _) = True
-isScalar _        = False
+isScalar (EBox _) = False
+isScalar _        = True
 
 enclose :: Val -> Val
 enclose x = Elems (Atom (asElem x))
@@ -317,6 +317,14 @@ asElem a = tap go a
   where go (Atom x) = ltoelem x
         go a = EBox (atoval a)
 
+unwrapAtom :: Val -> Maybe Elem
+unwrapAtom = tap (fmap ltoelem . unwrapAtomL)
+
+unwrapAtomL :: L a => Arr a -> Maybe a
+unwrapAtomL (Atom x) = Just x
+unwrapAtomL _ = Nothing
+
+
 unwrap :: Elem -> Val
 unwrap (EBox a) = a
 unwrap a        = Elems (Atom a)
@@ -324,6 +332,11 @@ unwrap a        = Elems (Atom a)
 isTrue :: L a => a -> Maybe Bool
 isTrue x = (0 /=) <$> toRat x
 {-# INLINE isTrue #-}
+
+valIsTrue :: Val -> Maybe Bool
+valIsTrue (Nums (Atom x)) = Just (x /= 0)
+valIsTrue (Elems (Atom x)) = isTrue x
+valIsTrue _ = Nothing
 
 asAxes :: Val -> Maybe [Axis]
 asAxes = tap asAxesL
