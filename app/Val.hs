@@ -12,6 +12,7 @@ import Parse (Ident)
 import Data.Kind (Type)
 import Data.Int (Int64)
 import Data.Ratio (numerator, denominator)
+import Control.Monad.Trans.Class (MonadTrans (lift))
 
 
 infixr 8 .:
@@ -19,7 +20,11 @@ infixr 8 .:
 (f .: g) x y = f (g x y)
 
 newtype Symbol = Symbol T.Text
-  deriving (Eq, Show, Hashable)
+  deriving (Eq, Hashable)
+instance Show Symbol where show (Symbol x) = '$':T.unpack x
+
+inBounds64 :: Integer -> Bool
+inBounds64 n = toInteger (minBound::Int64) <= n && n <= toInteger (maxBound::Int64)
 
 data Elem
   = ENum Rational
@@ -119,6 +124,14 @@ class (Monad m) => CashMonad m where
   source :: FilePath -> m (Maybe T.Text)
   source _ = pure Nothing
 
+instance {-# OVERLAPS #-} (CashMonad m, MonadTrans t) => CashMonad (t m) where
+  cashLog   = lift . cashLog
+  cashError = lift . cashError
+  effect    = lift . effect
+  callQuot  = lift .:callQuot
+  source    = lift . source
+
+
 data Act = Comb Fun [[Act]]
          | CombUnf Fun [[Act]]
          | Push Ident
@@ -137,7 +150,8 @@ data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
          | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
          | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
-         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes
+         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap
+         | FAsInts | FAsNums | FAsChars | FAsElems
 -- | FQuot [Act]
   deriving (Eq, Generic, Show)
 instance Hashable Fun
@@ -179,20 +193,9 @@ instance L Rational where
     where n = numerator x ; d = denominator x
   toRat = Just
 
-instance L Char where
-  type VecL Char = VU.Vector
-  ltoelem  = EChar
-  atoval   = Chars
-  lshow    = show
-
+instance L Char   where
+  type VecL Char   = VU.Vector; ltoelem = EChar;   atoval = Chars;   lshow = show
 instance L Symbol where
-  type VecL Symbol = VB.Vector
-  ltoelem  = ESymbol
-  atoval   = Symbols
-  lshow    = show
-
+  type VecL Symbol = VB.Vector; ltoelem = ESymbol; atoval = Symbols; lshow = show
 instance L T.Text where
-  type VecL T.Text = VB.Vector
-  ltoelem  = EPath
-  atoval   = Paths
-  lshow    = show
+  type VecL T.Text = VB.Vector; ltoelem = EPath;   atoval = Paths;   lshow = show

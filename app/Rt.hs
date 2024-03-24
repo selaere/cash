@@ -1,6 +1,6 @@
 module Rt where
 import Parse (Tok(..), Obj(..), Ident, Position(..), formatLine)
-import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem(..), Act(..), Fun)
+import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem(..), Act(..), Fun, inBounds64)
 import Arr (pattern Atom, asElem, list, unwrap)
 import qualified Control.Monad.Trans.State as S
 import qualified Data.HashMap.Strict as HM
@@ -25,38 +25,18 @@ defaultRtState = RtState { stacks = HM.empty, defs = primitives, sources = HM.em
 
 primitives :: HM.HashMap Ident Def
 primitives = (HM.fromList . map \(x,y,z) -> (x, Def y z))
-  [ ("+", Val.FAdd,     0)
-  , ("-", Val.FSub,     0)
-  , ("*", Val.FMul,     0)
-  , ("/", Val.FDiv,     0)
-  , ("<", Val.FLt,      0)
-  , ("=", Val.FEq,      0)
-  , (">", Val.FGt,      0)
-  , ("i/",Val.FDivi,    0)
-  , ("%", Val.FMod,     0)
-  , ("P", Val.FPow,     0)
-  , ("G", Val.FMax,     0)
-  , ("L", Val.FMin,     0)
-  , ("&", Val.FAnd,     0)
-  , ("\\",Val.FOr,      0)
-  , ("~", Val.FNot,     0)
-  , ("'", Val.FCat,     0)
-  , ("\"",Val.FCons,    0)
-  , ("E", Val.FReshape, 0)
-  , ("s#",Val.FShape,   0)
-  , ("!", Val.FDrop,    0)
-  , (".", Val.FDup,     0)
-  , (",", Val.FSwap,    0)
-  , (";", Val.FRot,     0)
-  , (":", Val.FOver,    0)
-  , ("`", Val.FShow,    0)
-  , ("^", Val.FCall,    0)
-  , ("b", Val.FBoth,    1)
-  , ("i", Val.FIf,      2)
-  , ("d", Val.FDip,     1)
-  , ("k", Val.FKeep,    1)
-  , ("w", Val.FWhile,   2)
-  , ("t", Val.FTimes,   1)
+  [ ("+", Val.FAdd, 0), ("-", Val.FSub, 0), ("*", Val.FMul, 0), ("/", Val.FDiv, 0)
+  , ("<", Val.FLt, 0), ("=", Val.FEq, 0), (">", Val.FGt, 0)
+  , ("i/",Val.FDivi, 0), ("%", Val.FMod, 0), ("P", Val.FPow, 0)
+  , ("G", Val.FMax, 0), ("L", Val.FMin, 0)
+  , ("&", Val.FAnd, 0), ("\\",Val.FOr, 0), ("~", Val.FNot, 0)
+  , ("'", Val.FCat, 0), ("\"",Val.FCons, 0)
+  , ("E", Val.FReshape, 0), ("s#",Val.FShape, 0)
+  , ("!", Val.FDrop, 0), (".", Val.FDup, 0), (",", Val.FSwap, 0), (";", Val.FRot, 0)
+  , (":", Val.FOver, 0), ("`", Val.FShow, 0), ("^", Val.FCall, 0)
+  , ("c<",Val.FAsChars, 0), ("n<", Val.FAsNums, 0), ("i<", Val.FAsInts, 0), ("e<", Val.FAsElems, 0)
+  , ("b", Val.FBoth, 1), ("i", Val.FIf, 2), ("d", Val.FDip, 1), ("k", Val.FKeep, 1)
+  , ("w", Val.FWhile, 2), ("t", Val.FTimes, 1), ("m", Val.FMap, 1)
   ]
 
 _stacks  :: Traversal' RtState (HM.HashMap Ident [Val])
@@ -145,8 +125,8 @@ runWith r os s = S.runStateT (run os s) r
 
 cutQuot :: HM.HashMap Ident Def -> [Tok] -> Either RtErr ([Act], [Tok])
 cutQuot defs (Tok loc (QuotF   a) : os) = first (WithOffset loc) ((,os) <$> readQuot defs a)
+-- todo do something different
 cutQuot defs (Tok loc (QuotUnf a) : os) = first (WithOffset loc) ((,os) <$> readQuot defs a)
-   -- todo do something different
 cutQuot defs a                          = first singleton <$> cutAct defs a
 
 cutAct' :: HM.HashMap Ident Def -> Obj -> [Tok] -> Either RtErr (Act, [Tok])
@@ -159,11 +139,12 @@ cutAct' defs (Cmd ident) os
     case HM.lookup ident defs of
       Just (Def call arity) -> readQuotN defs ([], os) arity <&> first (Comb call)
       Nothing               -> Left (CmdNotFound ident)
-cutAct' _efs (Numlit i) os   = Right (Const (Nums (Atom (toRational i))), os)
+cutAct' _efs (Numlit i) os | inBounds64 i = Right (Const (Ints (Atom (fromInteger i))), os)
+                           | otherwise    = Right (Const (Nums (Atom (fromInteger i))), os)
 cutAct' _efs (LitLabel l) os = Right (Const (Symbols (Atom (Val.Symbol l))), os)
 cutAct' defs (QuotF a) os = (,os) . Const . placeholderActsToVal <$> readQuot defs a
 cutAct' defs (QuotUnf a) os = cutAct' defs (QuotF a) os
-cutAct' _efs (Literal i t) os | T.null i  = Right (Const (list (EChar <$> T.unpack t)), os)
+cutAct' _efs (Literal i t) os | T.null i  = Right (Const (list (T.unpack t)), os)
                               | otherwise = Left (PatNotFound i)
 cutAct' _efs (OPush i) os = Right (Push i, os)
 cutAct' _efs (OPeek i) os = Right (Peek i, os)

@@ -8,26 +8,24 @@ import Control.Exception (assert)
 import Data.Function (on)
 import Control.Monad (guard, zipWithM)
 import Data.Functor (($>), (<&>))
-import Val (pattern Names, Val(..), Axis(..), Elem(..), Bivector(..), Arr(..), L(..), Vec)
+import Val ((.:), pattern Names, Val(..), Axis(..), Elem(..), Bivector(..), Arr(..), L(..), Vec)
 import Data.Maybe (fromMaybe)
 import Data.Coerce (coerce)
 import Data.Functor.Compose (Compose(..))
 import Data.Functor.Identity (Identity(..))
-
-
-infixr 8 .:
-(.:) :: (c->d) -> (a->b->c) -> a->b->d
-(f .: g) x y = f (g x y)
-
+import Data.List (intercalate)
 
 pattern Atom :: L a => a -> Arr a
 pattern Atom a <- Arr [] (V.head -> a) where Atom a = Arr [] (V.singleton a)
 
-list :: [Elem] -> Val
+list :: L a => [a] -> Val
 list = atoval . listl
 
 listl :: L a => [a] -> Arr a
 listl = vecl . V.fromList
+
+shapedl :: L a => [Axis] -> [a] -> Arr a
+shapedl sh = Arr sh . V.fromListN (axesSize sh)
 
 vec :: L a => Vec a -> Val
 vec = atoval . vecl
@@ -102,22 +100,22 @@ tapq f _ (Paths   x) = f x
 tapq f _ (Elems   x) = f x
 tapq _ g (Quot    x) = g x
 
-traverseA :: (Applicative f, L a, L b) => (a -> f b) -> Arr a -> f (Arr b)
-traverseA f (Arr sh a) = Arr sh . V.fromList <$> traverse f (V.toList a)
+traverseArr :: (Applicative f, L a, L b) => (a -> f b) -> Arr a -> f (Arr b)
+traverseArr f (Arr sh a) = Arr sh . V.fromList <$> traverse f (V.toList a)
 
-traverseA' :: (Applicative f, L a, L b, Vec a ~ Vec b) => (a -> f b) -> Arr a -> f (Arr b)
-traverseA' f (Arr sh a) = Arr sh <$> traverseV f a
+traverseArr' :: (Applicative f, L a, L b, Vec a ~ Vec b) => (a -> f b) -> Arr a -> f (Arr b)
+traverseArr' f (Arr sh a) = Arr sh <$> traverseV f a
 
 traverseV :: (V.Vector v a, V.Vector v b, Applicative f) => (a -> f b) -> v a -> f (v b)
 traverseV f xs =   -- copied from VB.Vector Traversable impl
   let !n = V.length xs
   in V.fromListN n <$> traverse f (V.toList xs)
 
-fmapArr' :: (L a, L b, Vec a ~ Vec b) => (a->b) -> Arr a -> Arr b
-fmapArr' f (Arr sh a) = Arr sh (V.map f a)
+mapArr' :: (L a, L b, Vec a ~ Vec b) => (a->b) -> Arr a -> Arr b
+mapArr' f (Arr sh a) = Arr sh (V.map f a)
 
-fmapArr :: (L a, L b) => (a->b) -> Arr a -> Arr b
-fmapArr f = coerce . traverseA (Identity . f)
+mapArr :: (L a, L b) => (a->b) -> Arr a -> Arr b
+mapArr f = coerce . traverseArr (Identity . f)
 
 tfmapb2 :: (Applicative f, L c)
         => (forall a b. (L a, L b, L c) => Arr a -> Arr b -> f (Arr c))
@@ -132,8 +130,8 @@ tzipb f = tagree (fmap atoval .: f)
 
 tagree :: (forall a. L a => Arr a -> Arr a -> b) -> Val -> Val -> b
 tagree f (Ints    a) (Ints    b) = f a b
-tagree f (Ints    a) (Nums    b) = f (fmapArr toRational a) b
-tagree f (Nums    a) (Ints    b) = f a (fmapArr toRational b)
+tagree f (Ints    a) (Nums    b) = f (mapArr toRational a) b
+tagree f (Nums    a) (Ints    b) = f a (mapArr toRational b)
 tagree f (Nums    a) (Nums    b) = f a b
 tagree f (Chars   a) (Chars   b) = f a b
 tagree f (Symbols a) (Symbols b) = f a b
@@ -235,7 +233,7 @@ lazip1 :: (Applicative m, L a, L b, L c)
        -> Arr a -> Arr b -> Maybe (m (Arr c))
 lazip1 f (Arr sh a) (Arr sh' b) =
   leadingAxis sh sh' <&> \(nlsh, i, i')->
-    Arr nlsh . V.fromListN (axesSize nlsh) <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
+    shapedl nlsh <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
 
 lazip :: (Applicative m, L a, L b, L c)
       => [Axis] -> (a -> b -> m (Vec c))
@@ -245,10 +243,10 @@ lazip nrsh f (Arr sh a) (Arr sh' b) =
     Arr (nlsh <> nrsh) . V.concat <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
 
 scalar :: L b => Applicative m => (forall a. L a => a -> m b) -> Val -> m Val
-scalar f (Elems a) = Elems <$> traverseA go a
+scalar f (Elems a) = Elems <$> traverseArr go a
   where go (EBox a) = EBox <$> scalar f a
         go a        = ltoelem <$> f a
-scalar f a = tfmapb (traverseA f) a
+scalar f a = tfmapb (traverseArr f) a
 
 biscalar :: forall m c . Applicative m => L c
          => m Val   -- mismatched axes error value
@@ -327,7 +325,7 @@ unwrapAtomL _ = Nothing
 
 unwrap :: Elem -> Val
 unwrap (EBox a) = a
-unwrap a        = Elems (Atom a)
+unwrap a        = spec (atoval . Atom) a
 
 isTrue :: L a => a -> Maybe Bool
 isTrue x = (0 /=) <$> toRat x
@@ -356,7 +354,7 @@ asAxis _ = Nothing
 reshape :: [Axis] -> Val -> Val
 reshape sh' = tmapor (reshapel sh') (q sh')
   where q [Ixd size] l = Quot  (take size (cycle l))
-        q sh'        l = Elems (Arr sh' (V.fromListN (axesSize sh') (cycle l)))
+        q sh'        l = Elems (shapedl sh' (cycle l))
 
 reshapel :: [Axis] -> Arr a -> Arr a
 reshapel sh' (Arr sh a) = Arr sh' (V.concat (replicate d a <> [V.take m a]))
@@ -375,7 +373,7 @@ forceQuot :: Val -> [Elem]
 forceQuot = tapq (fmap ltoelem . flattenToList) id
 
 asElems :: Val -> Arr Elem
-asElems = tap (fmapArr ltoelem)
+asElems = tap (mapArr ltoelem)
 
 construct :: Val -> Val -> Maybe Val
 construct (Quot a) b = Just (Quot (asElem b : a))
@@ -431,10 +429,25 @@ indexElementL is (Arr sh a) =
 
 shortShowL :: L a => Arr a -> String
 shortShowL (Atom a) = lshow a
-shortShowL (Arr sh a) = "{" <> show sh <> "⍴" <> (V.toList a >>= (" " <>) . lshow) <> "}"
+shortShowL (Arr sh a) = unwords (showAxis <$> sh) <> "{" <> unwords (lshow <$> V.toList a) <> "}"
+
+showShape :: [Axis] -> String
+showShape [] = "⍬"
+showShape [n] = showAxis n
+showShape ns = intercalate "_" (showAxis <$> ns)
+
+showAxis :: Axis -> String
+showAxis (Ixd n) = show n
+showAxis (Nmd (Bivector nms _)) = "{"<>unwords (V.toList (lshow <$> nms))<>"}"
 
 shortShow :: Val -> String
-shortShow = tap shortShowL
+shortShow (Ints    x) = 'I':shortShowL x
+shortShow (Nums    x) = 'N':shortShowL x
+shortShow (Chars (Arr sh a)) = 'C': show sh <> "⍴[" <> V.toList a <> "]"
+shortShow (Symbols x) = 'S':shortShowL x
+shortShow (Paths   x) = 'P':shortShowL x
+shortShow (Elems   x) = shortShowL x
+shortShow (Quot    x) = '(': unwords (lshow <$> x) <> " )"
 
 axisToElem :: Axis -> Elem
 axisToElem (Ixd n) = ENum (toRational n)
