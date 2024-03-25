@@ -150,7 +150,7 @@ data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
          | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
          | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
-         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap
+         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip
          | FAsInts | FAsNums | FAsChars | FAsElems
 -- | FQuot [Act]
   deriving (Eq, Generic, Show)

@@ -185,7 +185,7 @@ rankRel r newsh f (Arr sh a) =
 
 rankNumber :: Arr a -> Int -> Int
 rankNumber (Arr (axesSize -> len) _) r | r < 0     = min 0 (len + r)
-                                         | otherwise = max len r
+                                       | otherwise = max len r
 
 rank :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) -> Arr a -> m (Arr b)
 rank r newsh f a = rankRel (rankNumber a r) newsh f a
@@ -234,6 +234,14 @@ lazip1 :: (Applicative m, L a, L b, L c)
 lazip1 f (Arr sh a) (Arr sh' b) =
   leadingAxis sh sh' <&> \(nlsh, i, i')->
     shapedl nlsh <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
+
+-- where `lazip1 f` <-> `lazip [] (V.singleton .: f)`
+lazip1_ :: (Applicative m, L a, L b, L c)
+        => (a -> b -> m c)
+        -> Arr a -> Arr b -> Maybe (m ([Axis], [c]))
+lazip1_ f (Arr sh a) (Arr sh' b) =
+  leadingAxis sh sh' <&> \(nlsh, i, i')->
+    (nlsh,) <$> zipWithM (\j j'-> f (a V.! j) (b V.! j')) i i'
 
 lazip :: (Applicative m, L a, L b, L c)
       => [Axis] -> (a -> b -> m (Vec c))

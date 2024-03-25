@@ -12,6 +12,7 @@ import Data.Ratio (numerator, denominator)
 import GHC.Real ((%))
 import Control.Arrow ((>>>))
 import qualified Data.Vector.Generic as V
+import Data.Maybe (listToMaybe, fromMaybe)
 
 data PrimError
   = NotNumber
@@ -218,25 +219,26 @@ staticOp :: forall m. CashMonad m =>
 staticOp op = overflowingOp op (pure .: op)
 
 
-map2 :: forall m. CashMonad m => Val -> Val -> [Val] -> m [Val]
-map2 q (Quot a)  xs = map2 q (list a) xs
-map2 q (Elems a) xs = 
-  uncurry (:) <$> St.runStateT ( Elems <$> 
-    flip traverseArr a \x-> do
-      (x',xs) <- pop =<< call q . (unwrap x:) =<< St.get 
-      St.put xs
-      return (asElem x')
-  ) xs
-map2 q a xs = tap results a <&> \(b, xs')-> go a b : xs'
-  where
-    go :: Val -> [Elem] -> Val
-    go (Ints    (Arr sh _)) = buildOr (build canENum) canInt sh
-    go (Nums    (Arr sh _)) = build canENum    sh
-    go (Chars   (Arr sh _)) = build canEChar   sh
-    go (Symbols (Arr sh _)) = build canESymbol sh
-    go (Paths   (Arr sh _)) = build canEPath   sh
-    go _ = undefined
+buildTy :: [Axis] -> [Elem] -> Val
+buildTy sh z = case listToMaybe z of
+  Just (ENum    _) -> buildOr (build canENum) canInt sh z
+  Just (EChar   _) -> build canEChar   sh z
+  Just (ESymbol _) -> build canESymbol sh z
+  Just (EPath   _) -> build canEPath   sh z
+  _                -> Elems (shapedl sh z)
 
+build :: L a => (Elem -> Maybe a) -> [Axis] -> [Elem] -> Val
+build = buildOr (Elems .: shapedl)
+
+buildOr :: L a => ([Axis] -> [Elem] -> Val) -> (Elem -> Maybe a) -> [Axis] -> [Elem] -> Val
+buildOr f can sh z = case traverse can z of
+  Just z' -> atoval (shapedl sh z')
+  Nothing -> f sh z
+
+
+map2 :: forall m. CashMonad m => Val -> Val -> [Val] -> m [Val]
+map2 q a xs = tap results a <&> \(z, xs')-> buildTy (shape a) z : xs'
+  where
     results :: L a => Arr a -> m ([Elem], [Val])
     results (Arr _ a) = St.runStateT (traverse step (V.toList a)) xs
     
@@ -246,13 +248,21 @@ map2 q a xs = tap results a <&> \(b, xs')-> go a b : xs'
       St.put xs
       return (asElem x')
 
-    build :: L a => (Elem -> Maybe a) -> [Axis] -> [Elem] -> Val
-    build = buildOr (Elems .: shapedl)
+zip2 :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
+zip2 q a b xs = tap2 go a b
+  where
+    go :: (L a, L b) => Arr a -> Arr b -> m [Val]
+    go a b = St.runStateT val xs <&> uncurry (:)
+      where val :: St.StateT [Val] m Val
+            val = fromMaybe (cashError MismatchingAxes) (lazip1_ step a b) <&> uncurry buildTy
+    
+    step :: (L a, L b) => a -> b -> St.StateT [Val] m Elem
+    step x y = do
+      (x',xs) <- pop =<< call q . (atoval (Atom x) :) . (atoval (Atom y) :) =<< St.get 
+      St.put xs
+      return (asElem x')
 
-    buildOr :: L a => ([Axis] -> [Elem] -> Val) -> (Elem -> Maybe a) -> [Axis] -> [Elem] -> Val
-    buildOr f can sh b = case traverse can b of
-      Just b' -> atoval (shapedl sh b')
-      Nothing -> f sh b
+
 
 canInt     :: Elem -> Maybe Int64;    canInt     = \case (ENum x)->assertInt x; _ -> Nothing
 canENum    :: Elem -> Maybe Rational; canENum    = \case (ENum x)    -> Just x; _ -> Nothing
@@ -284,8 +294,8 @@ assertInt :: Rational -> Maybe Int64
 assertInt x = guard (d == 1 && inBounds64 n) $> fromInteger n
   where n = numerator x ; d = denominator x
 
-bool :: Bool -> Int64
-bool = toEnum . fromEnum
+boolInt :: Bool -> Int64
+boolInt = toEnum . fromEnum
 
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
@@ -334,9 +344,9 @@ exec FAdd  = bi add
 exec FSub  = bi sub
 exec FMul  = bi (overflowingOp (*) (overflow (*)))
 exec FDiv  = bi (binum (pure.:(/)))
-exec FLt   = bi (compOp (bool.:(<)) )
-exec FEq   = bi (compOp (bool.:(==)))
-exec FGt   = bi (compOp (bool.:(>)) )
+exec FLt   = bi (compOp (boolInt.:(<)) )
+exec FEq   = bi (compOp (boolInt.:(==)))
+exec FGt   = bi (compOp (boolInt.:(>)) )
 exec FDivi = bi (overflowingOp (\x y->toRational (floor (x/y) :: Integer)) quotS)
 exec FMod  = bi (overflowingOp (\x y-> x-y*(floor (x/y) % 1)) (Just .: rem))
 exec FPow  = bi (overflowingOp powr (overflow (^)))
@@ -357,27 +367,27 @@ exec FOver = pop2 >>> fmap \  (y,x,xs)-> y:x:y:xs
 exec FShow = mo0 (cashLog . Output . T.pack . show)
 exec FCall = pop >=> uncurry call
 exec FBoth = pop3 >=> \(q,z,y,xs) -> do xs' <- call q (y:xs); call q (z:xs')
-exec FIf   = pop3 >=> \(q,p,c,xs) -> do c <- assertBool c; if c then call p xs else call q xs
+exec FIf   = pop3 >=> \(q,p,c,xs) -> do c <- assertBoolVal c; call (if c then p else q) xs
 exec FDip  = pop2 >=> \(q,z,xs)-> do xs' <- call q    xs ; return (z:xs')
 exec FKeep = pop2 >=> \(q,z,xs)-> do xs' <- call q (z:xs); return (z:xs')
-exec FWhile= pop2 >=> while
+exec FWhile= pop2 >=> \(q,p,xs)->while q p xs
 exec FTimes= pop2 >=> \(q,n,xs)->
   do n <- fromMaybeErr (NotANumberV n) (unwrapAtom n >>= toRat)
      when (denominator n /= 1) (cashError (NotAnInteger (Nums (Atom n))))
      foldM (\xs' ()-> call q xs') xs (replicate (fromEnum (numerator n)) ())
 exec FMap  = pop2 >=> \(q,x,xs)->map2 q x xs
+exec FZip  = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
 exec FAsInts  = mo (\x-> fromMaybeErr (NotANumberV   x) (Ints <$> asInts  x) )
 exec FAsNums  = mo (\x-> fromMaybeErr (NotAnInteger  x) (Nums <$> asNums  x) )
 exec FAsChars = mo (\x-> fromMaybeErr (NotACharacter x) (Chars<$> asChars x) )
 exec FAsElems = mo (pure . Elems . asElems)
 
-while :: CashMonad m => (Val, Val, [Val]) -> m [Val]
-while (q,p,xs) = do
+while :: CashMonad m => Val -> Val -> [Val] -> m [Val]
+while q p xs = do
     (c,xs') <- pop =<< call p xs
-    c <- assertBool c
-    if c then do xs'' <- call q xs'
-                 exec FWhile (p:q:xs'')
+    c <- assertBoolVal c
+    if c then while q p =<< call q xs'
          else return xs'
 
-assertBool :: CashMonad m => Val -> m Bool
-assertBool x = fromMaybeErr (NotANumberV x) (valIsTrue x)
+assertBoolVal :: CashMonad m => Val -> m Bool
+assertBoolVal x = fromMaybeErr (NotANumberV x) (valIsTrue x)
