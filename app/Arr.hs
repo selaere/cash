@@ -13,7 +13,6 @@ import Data.Maybe (fromMaybe)
 import Data.Coerce (coerce)
 import Data.Functor.Compose (Compose(..))
 import Data.Functor.Identity (Identity(..))
-import Data.List (intercalate)
 
 pattern Atom :: L a => a -> Arr a
 pattern Atom a <- Arr [] (V.head -> a) where Atom a = Arr [] (V.singleton a)
@@ -434,28 +433,6 @@ indexElementL is (Arr sh a) =
     (Nmd (Bivector _ ie))  (Right i) -> HM.lookup i ie
   sh is
   <&> \indices-> a V.! (sum . zipWith (*) indices . tail . scanr (*) 1 . map axisLength) sh
-
-shortShowL :: L a => Arr a -> String
-shortShowL (Atom a) = lshow a
-shortShowL (Arr sh a) = unwords (showAxis <$> sh) <> "{" <> unwords (lshow <$> V.toList a) <> "}"
-
-showShape :: [Axis] -> String
-showShape [] = "⍬"
-showShape [n] = showAxis n
-showShape ns = intercalate "_" (showAxis <$> ns)
-
-showAxis :: Axis -> String
-showAxis (Ixd n) = show n
-showAxis (Nmd (Bivector nms _)) = "{"<>unwords (V.toList (lshow <$> nms))<>"}"
-
-shortShow :: Val -> String
-shortShow (Ints    x) = 'I':shortShowL x
-shortShow (Nums    x) = 'N':shortShowL x
-shortShow (Chars (Arr sh a)) = 'C': show sh <> "⍴[" <> V.toList a <> "]"
-shortShow (Symbols x) = 'S':shortShowL x
-shortShow (Paths   x) = 'P':shortShowL x
-shortShow (Elems   x) = shortShowL x
-shortShow (Quot    x) = '(': unwords (lshow <$> x) <> " )"
 
 axisToElem :: Axis -> Elem
 axisToElem (Ixd n) = ENum (toRational n)

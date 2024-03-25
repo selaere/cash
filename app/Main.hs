@@ -3,10 +3,9 @@ import Parse (parse)
 import qualified Data.Text.IO
 import Rt (defaultRtState, RtM, run, addSource)
 import System.IO (stdout, hFlush)
-import Val (Val)
+import Val (Val, shortShow)
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import qualified Control.Monad.Trans.State as S
-import Arr (shortShow)
 
 
 

@@ -13,6 +13,7 @@ import Data.Kind (Type)
 import Data.Int (Int64)
 import Data.Ratio (numerator, denominator)
 import Control.Monad.Trans.Class (MonadTrans (lift))
+import Data.List (intercalate)
 
 
 infixr 8 .:
@@ -173,7 +174,11 @@ instance L Elem where
   ltoelem  = id
   atoval   = Elems
   lshow (ENum a) = lshow a
-  lshow a        = show a
+  lshow (EBox a) = shortShow a
+  lshow (EChar a)   = show a
+  lshow (ESymbol a) = show a
+  lshow (EPath a)   = show a
+  lshow (ECmd a)    = show a
   toRat (ENum a) = Just a
   toRat _        = Nothing
 
@@ -199,3 +204,26 @@ instance L Symbol where
   type VecL Symbol = VB.Vector; ltoelem = ESymbol; atoval = Symbols; lshow = show
 instance L T.Text where
   type VecL T.Text = VB.Vector; ltoelem = EPath;   atoval = Paths;   lshow = show
+
+shortShowL :: L a => Arr a -> String
+shortShowL (Arr [] a) = lshow (V.head a)
+shortShowL (Arr sh a) = showShape sh <> "{" <> unwords (lshow <$> V.toList a) <> "}"
+
+showShape :: [Axis] -> String
+showShape [] = "⍬"
+showShape [n] = showAxis n
+showShape ns = intercalate "_" (showAxis <$> ns)
+
+showAxis :: Axis -> String
+showAxis (Ixd n) = show n
+showAxis (Nmd (Bivector nms _)) = "{"<>unwords (V.toList (lshow <$> nms))<>"}"
+
+shortShow :: Val -> String
+shortShow (Ints    x) = 'I':shortShowL x
+shortShow (Nums    x) = 'N':shortShowL x
+shortShow (Chars (Arr sh a)) = 'C': showShape sh <> "[" <> V.toList a <> "]"
+shortShow (Symbols x) = 'S':shortShowL x
+shortShow (Paths   x) = 'P':shortShowL x
+shortShow (Elems   x) = shortShowL x
+shortShow (Quot    x) = '(': unwords (lshow <$> x) <> ")"
+
