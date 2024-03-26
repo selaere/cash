@@ -14,7 +14,8 @@ import Data.Int (Int64)
 import Data.Ratio (numerator, denominator)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.List (intercalate)
-
+import Control.Monad (guard)
+import Data.Functor (($>))
 
 infixr 8 .:
 (.:) :: (c->d) -> (a->b->c) -> a->b->d
@@ -26,6 +27,10 @@ instance Show Symbol where show (Symbol x) = '$':T.unpack x
 
 inBounds64 :: Integer -> Bool
 inBounds64 n = toInteger (minBound::Int64) <= n && n <= toInteger (maxBound::Int64)
+
+assertInt :: Rational -> Maybe Int64
+assertInt x = guard (d == 1 && inBounds64 n) $> fromInteger n
+  where n = numerator x ; d = denominator x
 
 data Elem
   = ENum Rational

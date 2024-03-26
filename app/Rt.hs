@@ -1,7 +1,7 @@
 module Rt where
 import Parse (Tok(..), Obj(..), Ident, Position(..), formatLine)
-import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem(..), Act(..), Fun, inBounds64)
-import Arr (pattern Atom, asElem, list, unwrap)
+import Val (Val(..), CashMonad(..), Output(..), Error(..), Effect(..), Def(..), Elem(..), Act(..), Fun, assertInt)
+import Arr (pattern Atom, asElem, list, unwrap, listl)
 import qualified Control.Monad.Trans.State as S
 import qualified Data.HashMap.Strict as HM
 import Control.Monad.IO.Class (MonadIO(liftIO))
@@ -139,8 +139,14 @@ cutAct' defs (Cmd ident) os
     case HM.lookup ident defs of
       Just (Def call arity) -> readQuotN defs ([], os) arity <&> first (Comb call)
       Nothing               -> Left (CmdNotFound ident)
-cutAct' _efs (Numlit i) os | inBounds64 i = Right (Const (Ints (Atom (fromInteger i))), os)
-                           | otherwise    = Right (Const (Nums (Atom (fromInteger i))), os)
+cutAct' _efs (Numlit i) os =
+  (Right . (,os) . Const) case assertInt i of
+    Just i' -> Ints (Atom i')
+    Nothing -> Nums (Atom i)
+cutAct' _efs (Numlits is) os = 
+  (Right . (,os) . Const) case traverse assertInt is of
+    Just is' -> Ints (listl is')
+    Nothing  -> Nums (listl is)
 cutAct' _efs (LitLabel l) os = Right (Const (Symbols (Atom (Val.Symbol l))), os)
 cutAct' defs (QuotF a) os = (,os) . Const . placeholderActsToVal <$> readQuot defs a
 cutAct' defs (QuotUnf a) os = cutAct' defs (QuotF a) os

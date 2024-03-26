@@ -1,16 +1,17 @@
 module Parse where
-  
+
 import Data.Void (Void)
 import Text.Megaparsec
 import Data.Text (Text)
 import qualified Data.Char as Char
 import Text.Megaparsec.Char (space1)
-import Text.Megaparsec.Char.Lexer (decimal)
+import Text.Megaparsec.Char.Lexer (decimal, skipLineComment)
 import qualified Data.Text as T
 import Control.Monad (void, guard)
 import Control.Applicative ((<**>))
-import Data.Functor ((<&>))
+import Data.Functor ((<&>), ($>))
 import Text.Megaparsec.State (initialPosState)
+import Data.Char (isDigit, digitToInt)
 
 type Parser = Parsec Void Text
 
@@ -27,12 +28,16 @@ isContinuation c = c == '_' || case Char.generalCategory c of
   _ -> False
 
 sc :: Parser ()
-sc = skipMany (hidden space1)
+sc = skipMany (hidden (space1 <|> skipLineComment "_ "))
+
+text3 :: Char -> Char -> Char -> T.Text
+text3 x y z = T.pack [x,y,z]
 
 type Ident = Text
 
 
-data Obj = Numlit Integer
+data Obj = Numlit Rational
+         | Numlits [Rational]
          | Cmd Ident
          | LitLabel Ident
          | QuotF [Tok]
@@ -58,37 +63,57 @@ parseLit = single '[' *> (T.concat <$> many things) <* (void (single ']') <|> eo
 
 parseIdent :: Parser Obj
 parseIdent = do
-  a <- takeWhileP (Just "continuation character") isContinuation
-  b <- choice
-    ([ guard (not (T.null a))
-      *> (Cmd <$ lookAhead
-        (void (single '(') <|> void (single ')') <|> space1 <|> void eof))
-    , flip Literal <$> parseLit
+  head <- label "identifier head" heading
+  choice
+    [ guard (not (T.null head))
+      *> lookAhead (void (single '(') <|> void (single ')') <|> space1 <|> void eof)
+      $> Cmd head
+    , Literal head <$> parseLit
     , \case
-        '{' -> OPush
-        '|' -> OPeek
-        '}' -> OPop
-        x   -> Cmd . flip T.snoc x
-      <$> ending ] :: [Parser (Ident -> Obj)])
-  pure (b a)
+        '{' -> OPush head
+        '|' -> OPeek head
+        '}' -> OPop  head
+        x   -> Cmd (T.snoc head x)
+      <$> label "identifier ending" (satisfy ending) ]
   where
-    ending = label "ending character" (satisfy \x ->
-      not (Char.isSpace x || Char.isControl x || x == ']' || x == ')'))
+    heading = T.concat <$> many (
+          takeWhile1P Nothing isContinuation
+      <|> try (text3 <$> satisfy ending
+                     <*> single '_'
+                     <*> satisfy \x -> (ending x || isContinuation x) && not (isDigit x)) )
+    ending x = not (Char.isSpace x || Char.isControl x || x == ']' || x == ')')
 
 getPosition :: Parser Position
-getPosition = getParserState <&> \x -> 
+getPosition = getParserState <&> \x ->
   Position ((sourceName.pstateSourcePos.statePosState) x) (stateOffset x)
 
+parseNum :: Parser Obj
+parseNum = label "number literal" (strand <$> signed `sepBy1` single '_')
+  where
+    strand :: [Rational] -> Obj
+    strand [x] = Numlit x
+    strand xs  = Numlits xs
+    
+    signed :: Parser Rational
+    signed =
+      option id (single '_' $> negate)                                          -- sign
+      <*> ( (+)
+            <$> decimal                                                         -- integer part
+            <*> option 0 (single '.' *> (makeFrac <$> some (satisfy isDigit)))  -- rational part
+          )
+      where makeFrac = foldr (\x y->((toRational.digitToInt) x + y) / 10) 0
+
 parseTok :: Parser Tok
-parseTok = Tok <$> getPosition <*> choice
-  ([ Numlit <$> decimal
-  , (single '$' *> parseIdent) >>= \case
-      Cmd name -> return (LitLabel name)
-      _        -> fail "?xyz[] is invalid"
-  , single '(' *> sc *> many parseTok
-    <**> (QuotF <$ single ')' <|> QuotUnf <$ eof)
-  , parseIdent
-  ] :: [Parser Obj]) <* sc
+parseTok = Tok <$> getPosition <*> tok <* sc
+  where tok = choice
+          [ parseNum
+          , (single '$' *> parseIdent) >>= \case
+              Cmd name -> return (LitLabel name)
+              _        -> fail "$xyz[] is invalid"
+          , single '(' *> sc *> many parseTok
+            <**> (QuotF <$ single ')' <|> QuotUnf <$ eof)
+          , parseIdent
+          ]
 
 parseFile :: Parser [Tok]
 parseFile = sc *> many parseTok <* eof

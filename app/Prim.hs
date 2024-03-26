@@ -290,10 +290,6 @@ asChars (Elems a) = traverseArr canEChar a
 asChars (Quot a) = asChars (list a)
 asChars _ = Nothing
 
-assertInt :: Rational -> Maybe Int64
-assertInt x = guard (d == 1 && inBounds64 n) $> fromInteger n
-  where n = numerator x ; d = denominator x
-
 boolInt :: Bool -> Int64
 boolInt = toEnum . fromEnum
 
