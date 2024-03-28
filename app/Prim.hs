@@ -7,7 +7,7 @@ import qualified Control.Monad.Trans.State.Lazy as St
 import Data.Functor (($>), (<&>))
 import Data.Function (on)
 import Data.Int (Int64)
-import Control.Monad (guard, join, (>=>), foldM, when)
+import Control.Monad (guard, join, (>=>), foldM, when, unless)
 import Data.Ratio (numerator, denominator)
 import GHC.Real ((%))
 import Control.Arrow ((>>>))
@@ -270,6 +270,57 @@ canEChar   :: Elem -> Maybe Char;     canEChar   = \case (EChar x)   -> Just x; 
 canESymbol :: Elem -> Maybe Symbol;   canESymbol = \case (ESymbol x) -> Just x; _ -> Nothing
 canEPath   :: Elem -> Maybe T.Text;   canEPath   = \case (EPath x)   -> Just x; _ -> Nothing
 
+
+
+rankrel2 :: forall m. CashMonad m => Int -> Val -> Val -> [Val] -> m [Val]
+rankrel2 n q a xs = tap go a
+  where
+    go :: L a => Arr a -> m [Val]
+    go (Arr sh a) = St.runStateT val xs <&> uncurry (:)
+      where
+        (lsh,rsh) = splitAt n sh
+        val = do
+          z <- traverse (step . cellAt rsh a) (take (axesSize lsh) [0..])
+          first <- case z of
+            []  -> step (Atom 0 :: Arr Int64)
+            x:_ -> pure x
+          let nrsh = shape first
+          unless (all ((nrsh ==) . shape) z) (cashError MismatchingAxes)
+          return (buildTyV (lsh<>nrsh) first z)
+
+    step :: L a => Arr a -> St.StateT [Val] m Val
+    step x = do
+      (x',xs) <- pop =<< call q . (atoval x :) =<< St.get 
+      St.put xs
+      return x'
+
+-- invariant: z must have items of the same shape, which must be suffix of `sh`
+buildTyV :: [Axis] -> Val -> [Val] -> Val
+buildTyV sh first z = case first of
+  Ints    _ -> buildVOr (buildV canNums) canInts sh z
+  Nums    _ -> buildV canNums                    sh z
+  Chars   _ -> buildV canChars                   sh z
+  Symbols _ -> buildV canSymbols                 sh z
+  Paths   _ -> buildV canPaths                   sh z
+  _         -> aggregate sh (asElems <$> z)
+  where
+    aggregate :: L a => [Axis] -> [Arr a] -> Val
+    aggregate nrsh = atoval . Arr nrsh . V.concat . fmap (\(Arr _ a) -> a) 
+
+    buildV :: L a => (Val -> Maybe (Arr a)) -> [Axis] -> [Val] -> Val
+    buildV can sh = buildVOr (\sh -> aggregate sh . fmap asElems) can sh
+
+    buildVOr :: L a => ([Axis] -> [Val] -> Val) -> (Val -> Maybe (Arr a)) -> [Axis] -> [Val] -> Val
+    buildVOr f can sh z = case traverse can z of
+      Just z' -> aggregate sh z'
+      Nothing -> f sh z
+
+canInts       :: Val -> Maybe (Arr Int64);       canInts    = \case (Ints x)    -> Just x; _ -> Nothing
+canNums       :: Val -> Maybe (Arr Rational);    canNums    = \case (Nums x)    -> Just x; _ -> Nothing
+canChars      :: Val -> Maybe (Arr Char);        canChars   = \case (Chars x)   -> Just x; _ -> Nothing
+canSymbols    :: Val -> Maybe (Arr Symbol);      canSymbols = \case (Symbols x) -> Just x; _ -> Nothing
+canPaths      :: Val -> Maybe (Arr T.Text);      canPaths   = \case (Paths x)   -> Just x; _ -> Nothing
+
 asInts :: Val -> Maybe (Arr Int64)
 asInts (Ints n)  = Just n
 asInts (Nums n)  = traverseArr assertInt n
@@ -371,11 +422,12 @@ exec FTimes= pop2 >=> \(q,n,xs)->
   do n <- fromMaybeErr (NotANumberV n) (unwrapAtom n >>= toRat)
      when (denominator n /= 1) (cashError (NotAnInteger (Nums (Atom n))))
      foldM (\xs' ()-> call q xs') xs (replicate (fromEnum (numerator n)) ())
-exec FMap  = pop2 >=> \(q,x,xs)->map2 q x xs
-exec FZip  = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
-exec FAsInts  = mo (\x-> fromMaybeErr (NotANumberV   x) (Ints <$> asInts  x) )
-exec FAsNums  = mo (\x-> fromMaybeErr (NotAnInteger  x) (Nums <$> asNums  x) )
-exec FAsChars = mo (\x-> fromMaybeErr (NotACharacter x) (Chars<$> asChars x) )
+exec FMap   = pop2 >=> \(q,x,xs)->map2 q x xs
+exec FZip   = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
+exec FCells = pop2 >=> \(q,x,xs)->rankrel2 1 q x xs
+exec FAsInts  = mo \x-> fromMaybeErr (NotANumberV   x) (Ints <$> asInts  x)
+exec FAsNums  = mo \x-> fromMaybeErr (NotAnInteger  x) (Nums <$> asNums  x)
+exec FAsChars = mo \x-> fromMaybeErr (NotACharacter x) (Chars<$> asChars x)
 exec FAsElems = mo (pure . Elems . asElems)
 
 while :: CashMonad m => Val -> Val -> [Val] -> m [Val]
