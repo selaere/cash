@@ -1,7 +1,6 @@
 module Arr where
 
 import qualified Data.Vector.Generic as V
-import qualified Data.Vector as VB
 import qualified Data.Vector.Generic.Mutable as VM
 import qualified Data.HashMap.Strict as HM
 import Control.Exception (assert)
@@ -181,18 +180,6 @@ rankRel :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) ->
 rankRel r newsh f (Arr sh a) =
   Arr (lsh <> newsh) . V.concat <$> traverse (f . cellAt rsh a) [0..axesSize lsh]
   where (lsh,rsh) = splitAt r sh
-{-
-rankRel_ :: (Applicative m, L a, L b) => Int -> (Arr a -> m (Arr b)) -> Arr a -> m ([Axis], [Arr b])
-rankRel_ r f (Arr sh a) =
-  (lsh ,) <$> traverse (f . cellAt rsh a) [0..axesSize lsh]
-  where (lsh,rsh) = splitAt r sh
--}
-rankNumber :: Arr a -> Int -> Int
-rankNumber (Arr (axesSize -> len) _) r | r < 0     = min 0 (len + r)
-                                       | otherwise = max len r
-
-rank :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) -> Arr a -> m (Arr b)
-rank r newsh f a = rankRel (rankNumber a r) newsh f a
 
 
 leadingAxis :: [Axis] -> [Axis] -> Maybe ([Axis], [Int], [Int])
@@ -217,19 +204,6 @@ birankRel r r' nrsh f (Arr sh a) (Arr sh' b) =
 
 tap2 :: (forall a b. (L a, L b) => Arr a -> Arr b -> c) -> Val -> Val -> c
 tap2 f = flip (tap (flip (tap f)))
-
-birank :: Applicative m
-       => Int -> Int
-       -> [Axis] -> (Val -> Val -> m (VB.Vector Elem))
-       -> Val -> Val -> Maybe (m Val)
-birank r r' newsh f a b =
-  fmap atoval <$> tap2 (birankL r r' newsh \x y -> f (atoval x) (atoval y)) a b
-
-birankL :: (Applicative m, L a, L b, L c)
-        => Int -> Int
-        -> [Axis] -> (Arr a -> Arr b -> m (Vec c))
-        -> Arr a -> Arr b -> Maybe (m (Arr c))
-birankL r r' newsh f a b = birankRel (rankNumber a r) (rankNumber b r') newsh f a b
 
 -- where `lazip1 f` <-> `lazip [] (V.singleton .: f)`
 lazip1 :: (Applicative m, L a, L b, L c)
@@ -342,10 +316,14 @@ isTrue :: L a => a -> Maybe Bool
 isTrue x = (0 /=) <$> toRat x
 {-# INLINE isTrue #-}
 
+singleRat :: Val -> Maybe Rational
+singleRat (Nums (Atom x)) = Just x
+singleRat (Ints (Atom x)) = Just (toRational x)
+singleRat (Elems (Atom x)) = toRat x
+singleRat _ = Nothing
+
 valIsTrue :: Val -> Maybe Bool
-valIsTrue (Nums (Atom x)) = Just (x /= 0)
-valIsTrue (Elems (Atom x)) = isTrue x
-valIsTrue _ = Nothing
+valIsTrue = fmap (0 /=) . singleRat
 
 asAxes :: Val -> Maybe [Axis]
 asAxes = tap asAxesL

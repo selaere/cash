@@ -37,7 +37,7 @@ primitives = (HM.fromList . map \(x,y,z) -> (x, Def y z))
   , ("c<",Val.FAsChars, 0), ("n<", Val.FAsNums, 0), ("i<", Val.FAsInts, 0), ("e<", Val.FAsElems, 0)
   , ("b", Val.FBoth, 1), ("i", Val.FIf, 2), ("d", Val.FDip, 1), ("k", Val.FKeep, 1)
   , ("w", Val.FWhile, 2), ("t", Val.FTimes, 1), ("m", Val.FMap, 1), ("z", Val.FZip, 1)
-  , ("c", Val.FCells, 1)
+  , ("c", Val.FCells, 1), ("bc", Val.FBicells, 1), ("s", Val.FRank, 1), ("bs", Val.FBirank, 1)
   ]
 
 _stacks  :: Traversal' RtState (HM.HashMap Ident [Val])
