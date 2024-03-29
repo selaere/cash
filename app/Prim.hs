@@ -13,6 +13,7 @@ import GHC.Real ((%))
 import Control.Arrow ((>>>))
 import qualified Data.Vector.Generic as V
 import Data.Maybe (listToMaybe, fromMaybe)
+import Control.Monad.Trans.Class (lift)
 
 data PrimError
   = NotNumber
@@ -173,14 +174,15 @@ or2 = handleNum op op \cases
   a         b         -> (lazipCash goElem `on` asElems) a b
   where
     op :: (Num x, Eq x) => x -> x -> x
-    op = \cases   0  y -> y; x _ -> x
+    op 0 y = y
+    op x _ = x
 
     goElem :: Elem -> Elem -> m Elem
     goElem (EBox x) (EBox y) = EBox <$> or2 x y
     goElem x (EBox y) = EBox <$> or2 (atoval (Atom x)) y
     goElem (ENum    0 ) y = pure y
     goElem (EChar '\0') y = pure y
-    goElem (EBox x) y = EBox <$> or2 x (atoval (Atom y))
+    goElem (EBox    x ) y = EBox <$> or2 x (atoval (Atom y))
     goElem x _ = pure x
 
 -- convenience. you can't define max and min in terms of this because of some type bullshit
@@ -213,54 +215,45 @@ overflowingOp op op64 = go
   where go = handleNumOverf op op64 (lazipCash goElem `on` asElems)
         goElem = handleElemNum go op
 
-staticOp :: forall m. CashMonad m =>
-            (forall n. Real n => n->n->n)
-            -> Val -> Val -> m Val
-staticOp op = overflowingOp op (pure .: op)
+doWithStack :: CashMonad m => ([Val] -> m [Val]) -> St.StateT [Val] m Val
+doWithStack f = do
+  (x',xs) <- pop =<< lift.f =<< St.get 
+  St.put xs
+  return x'
 
-
-buildTy :: [Axis] -> [Elem] -> Val
-buildTy sh z = case listToMaybe z of
-  Just (ENum    _) -> buildOr (build canENum) canInt sh z
-  Just (EChar   _) -> build canEChar   sh z
-  Just (ESymbol _) -> build canESymbol sh z
-  Just (EPath   _) -> build canEPath   sh z
+buildElems :: [Axis] -> [Elem] -> Val
+buildElems sh z = case listToMaybe z of
+  Just (ENum    _) -> build canInt     (build canENum elems)
+  Just (EChar   _) -> build canEChar   elems
+  Just (ESymbol _) -> build canESymbol elems
+  Just (EPath   _) -> build canEPath   elems
   _                -> Elems (shapedl sh z)
+  where
+    elems = Elems (shapedl sh z)
 
-build :: L a => (Elem -> Maybe a) -> [Axis] -> [Elem] -> Val
-build = buildOr (Elems .: shapedl)
-
-buildOr :: L a => ([Axis] -> [Elem] -> Val) -> (Elem -> Maybe a) -> [Axis] -> [Elem] -> Val
-buildOr f can sh z = case traverse can z of
-  Just z' -> atoval (shapedl sh z')
-  Nothing -> f sh z
-
+    build :: L a => (Elem -> Maybe a) -> Val -> Val
+    build can f = case traverse can z of
+      Just z' -> atoval (shapedl sh z')
+      Nothing -> f
 
 map2 :: forall m. CashMonad m => Val -> Val -> [Val] -> m [Val]
-map2 q a xs = tap results a <&> \(z, xs')-> buildTy (shape a) z : xs'
+map2 q a xs = tap results a <&> \(z, xs')-> buildElems (shape a) z : xs'
   where
     results :: L a => Arr a -> m ([Elem], [Val])
     results (Arr _ a) = St.runStateT (traverse step (V.toList a)) xs
     
     step :: L a => a -> St.StateT [Val] m Elem
-    step x = do
-      (x',xs) <- pop =<< call q . (atoval (Atom x) :) =<< St.get 
-      St.put xs
-      return (asElem x')
+    step x = asElem <$> doWithStack (call q . (atoval (Atom x) :))
 
 zip2 :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
-zip2 q a b xs = tap2 go a b
+zip2 q a b xs = tap2 go a b <&> uncurry (:)
   where
-    go :: (L a, L b) => Arr a -> Arr b -> m [Val]
-    go a b = St.runStateT val xs <&> uncurry (:)
-      where val :: St.StateT [Val] m Val
-            val = fromMaybe (cashError MismatchingAxes) (lazip1_ step a b) <&> uncurry buildTy
+    go :: (L a, L b) => Arr a -> Arr b -> m (Val, [Val])
+    go a b = St.runStateT val xs
+      where val = fromMaybe (cashError MismatchingAxes) (lazip1_ step a b) <&> uncurry buildElems
     
     step :: (L a, L b) => a -> b -> St.StateT [Val] m Elem
-    step x y = do
-      (x',xs) <- pop =<< call q . (atoval (Atom x) :) . (atoval (Atom y) :) =<< St.get 
-      St.put xs
-      return (asElem x')
+    step x y = asElem <$> doWithStack (call q . (atoval (Atom x) :) . (atoval (Atom y) :))
 
 canInt     :: Elem -> Maybe Int64;    canInt     = \case (ENum x)->assertInt x; _ -> Nothing
 canENum    :: Elem -> Maybe Rational; canENum    = \case (ENum x)    -> Just x; _ -> Nothing
@@ -282,10 +275,7 @@ rankrel2 n q a xs = tap go a
           buildVals lsh first z
 
     step :: L a => Arr a -> St.StateT [Val] m Val
-    step x = do
-      (x',xs) <- pop =<< call q . (atoval x :) =<< St.get 
-      St.put xs
-      return x'
+    step x = doWithStack (call q . (atoval x :))
 
 birankrel2 :: forall m. CashMonad m => Int -> Int -> Val -> Val -> Val -> [Val] -> m [Val]
 birankrel2 r r' q a b xs = tap2 go a b
@@ -303,10 +293,7 @@ birankrel2 r r' q a b xs = tap2 go a b
           buildVals nlsh first z
 
     step :: (L a, L b) => Arr a -> Arr b -> St.StateT [Val] m Val
-    step x y = do
-      (x',xs) <- pop =<< call q . (atoval x :) . (atoval y :) =<< St.get 
-      St.put xs
-      return x'
+    step x y = doWithStack (call q . (atoval x :) . (atoval y :))
 
 buildVals :: CashMonad m => [Axis] -> Val -> [Val] -> m Val
 buildVals nlsh first z = 
@@ -382,7 +369,7 @@ pop4 xs           = cashError (Underflow 4 (length xs))
 
 pop5 :: CashMonad m => [Val] -> m (Val,Val,Val,Val,Val,[Val])
 pop5 (v:w:x:y:z:xs) = pure (v,w,x,y,z,xs)
-pop5 xs           = cashError (Underflow 5 (length xs))
+pop5 xs             = cashError (Underflow 5 (length xs))
 
 -- binary function, 1 output
 bi :: CashMonad m => (Val -> Val -> m Val) -> [Val] -> m [Val]
