@@ -28,6 +28,8 @@ data PrimError
   | CharRational
   | NotAnInteger Val
   | NotACharacter Val
+  | OutOfRange Val Val
+  | NotAList Val
   deriving (Eq, Show)
 
 instance Error PrimError where
@@ -342,6 +344,18 @@ asChars (Elems a) = traverseArr canEChar a
 asChars (Quot a) = asChars (list a)
 asChars _ = Nothing
 
+select :: CashMonad m => Val -> Val -> m Val
+select a bb@(Ints b) = fromMaybeErr (OutOfRange a bb) (tfmap (indexCells b) a)
+select a bb@(Nums b) = fromMaybeErr (OutOfRange a bb) (tfmap (indexCells b) a)
+select a bb = tap (\b -> fromMaybeErr (OutOfRange a bb) (tfmap (indexCellsByName b) a)) bb
+
+pick :: forall m. CashMonad m => Val -> Val -> m Val
+pick a bb = tap go bb
+  where go :: L a => Arr a -> m Val
+        go (Arr [] b) = go (Arr [Ixd 1] b)
+        go (Arr [Ixd _] b) = fromMaybeErr (OutOfRange a bb) (unwrap <$> indexElement' b a)
+        go _ = cashError (OutOfRange a bb)
+
 boolInt :: Bool -> Int64
 boolInt = toEnum . fromEnum
 
@@ -443,6 +457,8 @@ exec FAsInts  = mo \x-> fromMaybeErr (NotANumberV   x) (Ints <$> asInts  x)
 exec FAsNums  = mo \x-> fromMaybeErr (NotAnInteger  x) (Nums <$> asNums  x)
 exec FAsChars = mo \x-> fromMaybeErr (NotACharacter x) (Chars<$> asChars x)
 exec FAsElems = mo (pure . Elems . asElems)
+exec FPick    = bi pick
+exec FSelect  = bi select
 
 rankNumberC :: CashMonad m => Val -> Val -> m Int
 rankNumberC (shape -> length -> len) r =

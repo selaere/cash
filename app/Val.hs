@@ -156,6 +156,7 @@ data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
          | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
          | FCat | FCons | FReshape | FShape
          | FDrop | FDup | FSwap | FRot | FOver | FShow
+         | FPick | FSelect
          | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip 
          | FCells | FBicells | FRank | FBirank
          | FAsInts | FAsNums | FAsChars | FAsElems
@@ -230,6 +231,6 @@ shortShow (Nums    x) = 'N':shortShowL x
 shortShow (Chars (Arr sh a)) = 'C': showShape sh <> "[" <> V.toList a <> "]"
 shortShow (Symbols x) = 'S':shortShowL x
 shortShow (Paths   x) = 'P':shortShowL x
-shortShow (Elems   x) = shortShowL x
+shortShow (Elems   x) = 'E':shortShowL x
 shortShow (Quot    x) = '(': unwords (lshow <$> x) <> ")"
 

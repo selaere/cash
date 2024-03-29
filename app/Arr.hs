@@ -173,8 +173,11 @@ firstCellL (Arr [] _) = Nothing
 --unconsCell (Quot (a:as)) = Just (Atom a, Quot as)
 --unconsCell _ = Nothing
 
+cellAtV :: L a => [Axis] -> Vec a -> Int -> Vec a
+cellAtV sh a n = V.slice (n*size) size a where size = axesSize sh
+
 cellAt :: L a => [Axis] -> Vec a -> Int -> Arr a
-cellAt sh a n = Arr sh (V.slice (n*size) size a) where size = axesSize sh
+cellAt sh a n = Arr sh (cellAtV sh a n)
 
 rankRel :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) -> Arr a -> m (Arr b)
 rankRel r newsh f (Arr sh a) =
@@ -380,14 +383,14 @@ catenate (Quot a) (Quot b) = Just (Quot (a ++ b))
 catenate a b = tzip go a b
   where
     go (Atom a) (Atom b) = Just (pairl a b)
-    go (Arr (Ixd n : sh) a) (Arr (Ixd n' : sh') b) |sh==sh'= Just (Arr (Ixd (n + n') : sh) (a V.++ b))
-    go (Arr (Ixd n : sh) a) (Arr           sh'  b) |sh==sh'= Just (Arr (Ixd (n + 1 ) : sh) (a V.++ b))
-    go (Arr          sh  a) (Arr (Ixd n' : sh') b) |sh==sh'= Just (Arr (Ixd (1 + n') : sh) (a V.++ b))
+    go (Arr (Ixd n : sh) a) (Arr (Ixd n' : sh') b) |sh==sh'= Just (Arr (Ixd (n+n') : sh) (a V.++ b))
+    go (Arr (Ixd n : sh) a) (Arr           sh'  b) |sh==sh'= Just (Arr (Ixd (n+1 ) : sh) (a V.++ b))
+    go (Arr          sh  a) (Arr (Ixd n' : sh') b) |sh==sh'= Just (Arr (Ixd (1+n') : sh) (a V.++ b))
     go (Arr (Nmd n : sh) a) (Arr (Nmd n' : sh') b) |sh==sh'= Just (mergeRecordsL n n' sh a b)
     go _ _ = Nothing
 
 fitsIn :: Int -> Int -> Bool
-fitsIn len n = n >= 0 && n < len
+n `fitsIn` len = n >= 0 && n < len
 
 indexCell :: Int -> Val -> Maybe Val
 indexCell n (Quot elems) = guard (n `fitsIn` length elems) $> Elems (Atom (elems !! n))
@@ -397,6 +400,22 @@ indexCellL :: forall a. L a => Int -> Arr a -> Maybe (Arr a)
 indexCellL n (Arr (ax : sh) a) = guard (n `fitsIn` axisLength ax) $> cellAt sh a n
 indexCellL _ (Arr [] _) = Nothing
 
+-- todo: dont use Enum
+indexCells :: forall a n. (L a, L n, Enum n) => Arr n -> Arr a -> Maybe (Arr a)
+indexCells (Arr sh' n) (Arr (ax:sh) a) =
+  Arr (sh'<>sh) . V.concat <$> traverse (go . fromEnum) (V.toList n)
+  where go :: Int -> Maybe (Vec a)
+        go n = guard (n `fitsIn` axisLength ax) $> cellAtV sh a n
+indexCells _ _ = Nothing
+
+indexCellsByName :: forall a b. (L a, L b) => Arr b -> Arr a -> Maybe (Arr a)
+indexCellsByName (Arr sh' b) (Arr (Nmd (Bivector ie ei) : sh) a) =
+  Arr (sh'<>sh) . V.concat <$> traverse go (V.toList b)
+  where go :: b -> Maybe (Vec a)
+        go (fmap fromEnum . toRat -> Just n) = guard (n `fitsIn` V.length ie) $> cellAtV sh a n
+        go i = cellAtV sh a <$> HM.lookup (ltoelem i) ei
+indexCellsByName _ _ = Nothing
+
 indexCellByName :: Elem -> Arr a -> Maybe (Arr a)
 indexCellByName i (Arr (Nmd (Bivector _ ei) : sh) a) = cellAt sh a <$> HM.lookup i ei
 indexCellByName _ _ = Nothing
@@ -404,6 +423,9 @@ indexCellByName _ _ = Nothing
 indexElement :: [Either Int Elem] -> Val -> Maybe Elem
 indexElement [Left n] (Quot a) = guard (n `fitsIn` length a) $> a !! n
 indexElement is x = tap (fmap ltoelem . indexElementL is) x
+
+indexElement' :: L n => Vec n -> Val -> Maybe Elem
+indexElement' is = tap (fmap ltoelem . indexElementL' is)
 
 indexElementL :: forall a. L a => [Either Int Elem] -> Arr a -> Maybe a
 indexElementL is (Arr sh a) =
@@ -415,6 +437,19 @@ indexElementL is (Arr sh a) =
     (Nmd (Bivector _ ie))  (Right i) -> HM.lookup i ie
   sh is
   <&> \indices-> a V.! (sum . zipWith (*) indices . tail . scanr (*) 1 . map axisLength) sh
+
+-- todo: dont use Enum
+indexElementL' :: forall a n. (L a, L n) => Vec n -> Arr a -> Maybe a
+indexElementL' is (Arr sh a) =
+  guard (length sh == V.length is) >>
+  zipWithM \cases
+    (Ixd end)              (fmap fromEnum . toRat -> Just n) -> guard (n `fitsIn` end       ) $> n
+    (Nmd (Bivector nms _)) (fmap fromEnum . toRat -> Just n) -> guard (n `fitsIn` length nms) $> n
+    (Ixd _)                _  -> Nothing
+    (Nmd (Bivector _ ie))  i  -> HM.lookup (ltoelem i) ie
+  sh (V.toList is)
+  <&> \indices-> a V.! (sum . zipWith (*) indices . tail . scanr (*) 1 . map axisLength) sh
+
 
 axisToElem :: Axis -> Elem
 axisToElem (Ixd n) = ENum (toRational n)
