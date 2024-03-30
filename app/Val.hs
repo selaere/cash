@@ -153,7 +153,7 @@ data Def = Def Fun Int
 
 data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
         | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
-        | FCat | FCons | FReshape | FShape
+        | FCat | FCons | FReshape | FShape | FLength
         | FDrop | FDup | FSwap | FRot | FOver | FShow
         | FPick | FSelect
         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip 

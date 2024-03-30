@@ -411,45 +411,46 @@ powr x y | denominator y == 1 = x^numerator y
          | otherwise          = toRational (on (**) fromRational x y :: Double)
 
 exec :: CashMonad m => Fun -> [Val] -> m [Val]
-exec FAdd  = bi add
-exec FSub  = bi sub
-exec FMul  = bi (overflowingOp (*) (overflow (*)))
-exec FDiv  = bi (binum (pure.:(/)))
-exec FLt   = bi (compOp (boolInt.:(<)) )
-exec FEq   = bi (compOp (boolInt.:(==)))
-exec FGt   = bi (compOp (boolInt.:(>)) )
-exec FDivi = bi (overflowingOp (\x y->toRational (floor (x/y) :: Integer)) quotS)
-exec FMod  = bi (overflowingOp (\x y-> x-y*(floor (x/y) % 1)) (Just .: rem))
-exec FPow  = bi (overflowingOp powr (overflow (^)))
-exec FMax  = bi (agreeOp max max max)
-exec FMin  = bi (agreeOp min min min)
-exec FAnd  = bi and2
-exec FOr   = bi or2
-exec FNot  = mo (monum (pure . toRational . fromEnum . (== 0)))
-exec FCat  = bi (fromMaybeErr ShapeError .: catenate)
-exec FCons = bi (fromMaybeErr ShapeError .: construct)
+exec FAdd     = bi add
+exec FSub     = bi sub
+exec FMul     = bi (overflowingOp (*) (overflow (*)))
+exec FDiv     = bi (binum (pure.:(/)))
+exec FLt      = bi (compOp (boolInt.:(<)) )
+exec FEq      = bi (compOp (boolInt.:(==)))
+exec FGt      = bi (compOp (boolInt.:(>)) )
+exec FDivi    = bi (overflowingOp (\x y->toRational (floor (x/y) :: Integer)) quotS)
+exec FMod     = bi (overflowingOp (\x y-> x-y*(floor (x/y) % 1)) (Just .: rem))
+exec FPow     = bi (overflowingOp powr (overflow (^)))
+exec FMax     = bi (agreeOp max max max)
+exec FMin     = bi (agreeOp min min min)
+exec FAnd     = bi and2
+exec FOr      = bi or2
+exec FNot     = mo (monum (pure . toRational . fromEnum . (== 0)))
+exec FCat     = bi (fromMaybeErr ShapeError .: catenate)
+exec FCons    = bi (fromMaybeErr ShapeError .: construct)
 exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes y <*> pure x)
-exec FShape= mo (pure . axesToVal . shape)
-exec FDrop = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
-exec FDup  = pop  >>> fmap \    (x,xs)->   x:x:xs
-exec FSwap = pop2 >>> fmap \  (y,x,xs)->   x:y:xs
-exec FRot  = pop3 >>> fmap \(z,y,x,xs)-> x:z:y:xs
-exec FOver = pop2 >>> fmap \  (y,x,xs)-> x:y:x:xs
-exec FShow = mo0 (cashLog . Output . T.pack . show)
-exec FCall = pop >=> uncurry call
-exec FBoth = pop3 >=> \(q,z,y,xs) -> do xs' <- call q (y:xs); call q (z:xs')
-exec FIf   = pop3 >=> \(q,p,c,xs) -> do c <- assertBoolVal c; call (if c then p else q) xs
-exec FDip  = pop2 >=> \(q,z,xs)-> do xs' <- call q    xs ; return (z:xs')
-exec FKeep = pop2 >=> \(q,z,xs)-> do xs' <- call q (z:xs); return (z:xs')
-exec FWhile= pop2 >=> \(q,p,xs)->while q p xs
-exec FTimes= pop2 >=> \(q,n,xs)->
+exec FShape   = mo (pure . axesToVal . shape)
+exec FLength  = mo (pure . Ints . Atom . toEnum . axisLength . head . shape)
+exec FDrop    = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
+exec FDup     = pop  >>> fmap \    (x,xs)->   x:x:xs
+exec FSwap    = pop2 >>> fmap \  (y,x,xs)->   x:y:xs
+exec FRot     = pop3 >>> fmap \(z,y,x,xs)-> x:z:y:xs
+exec FOver    = pop2 >>> fmap \  (y,x,xs)-> x:y:x:xs
+exec FShow    = mo0 (cashLog . Output . T.pack . show)
+exec FCall    = pop >=> uncurry call
+exec FBoth    = pop3 >=> \(q,z,y,xs) -> do xs' <- call q (y:xs); call q (z:xs')
+exec FIf      = pop3 >=> \(q,p,c,xs) -> do c <- assertBoolVal c; call (if c then p else q) xs
+exec FDip     = pop2 >=> \(q,z,xs)-> do xs' <- call q    xs ; return (z:xs')
+exec FKeep    = pop2 >=> \(q,z,xs)-> do xs' <- call q (z:xs); return (z:xs')
+exec FWhile   = pop2 >=> \(q,p,xs)->while q p xs
+exec FTimes   = pop2 >=> \(q,n,xs)->
   do n <- fromMaybeErr (NotANumberV n) (unwrapAtom n >>= toRat)
      when (denominator n /= 1) (cashError (NotAnInteger (Nums (Atom n))))
      foldM (\xs' ()-> call q xs') xs (replicate (fromEnum (numerator n)) ())
-exec FMap   = pop2 >=> \(q,x,xs)->map2 q x xs
-exec FZip   = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
-exec FCells = pop2 >=> \(q,x,xs)->rankrel2 1 q x xs
-exec FRank  = pop3 >=> \(q,r,x,xs)->rankNumberC x r >>= \r -> rankrel2 r q x xs
+exec FMap     = pop2 >=> \(q,x,xs)->map2 q x xs
+exec FZip     = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
+exec FCells   = pop2 >=> \(q,x,xs)->rankrel2 1 q x xs
+exec FRank    = pop3 >=> \(q,r,x,xs)->rankNumberC x r >>= \r -> rankrel2 r q x xs
 exec FBicells = pop3 >=> \(q,a,b,xs)-> birankrel2 1 1 q a b xs
 exec FBirank  = pop5 >=> \(q,r,r',a,b,xs)-> do r  <- rankNumberC a r
                                                r' <- rankNumberC b r'
