@@ -30,6 +30,7 @@ data PrimError
   | NotACharacter Val
   | OutOfRange Val Val
   | NotAList Val
+  | ListIsEmpty Val
   deriving (Eq, Show)
 
 instance Error PrimError where
@@ -459,6 +460,13 @@ exec FAsChars = mo \x-> fromMaybeErr (NotACharacter x) (Chars<$> asChars x)
 exec FAsElems = mo (pure . Elems . asElems)
 exec FPick    = bi pick
 exec FSelect  = bi select
+exec FMatches = bi (pure . Ints . Atom . boolInt.:(==))
+exec FYank    = mo \a-> fromMaybeErr (ListIsEmpty a) (yank a)
+exec FKernel  = mo (pure . enclose)
+exec FVector1 = mo (pure . tap listl1)
+exec FVector2 = bi (pure .: tagree listl2)
+exec FIota    = mo \a-> fromMaybeErr (NotANumberV a) (singleRat a >>= assertInt
+                    <&> \x -> list (take (fromEnum x) [0::Int64 ..]))
 
 rankNumberC :: CashMonad m => Val -> Val -> m Int
 rankNumberC (shape -> length -> len) r =

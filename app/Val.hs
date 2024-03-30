@@ -160,6 +160,7 @@ data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
          | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip 
          | FCells | FBicells | FRank | FBirank
          | FAsInts | FAsNums | FAsChars | FAsElems
+         | FMatches | FYank | FKernel | FVector1 | FVector2 | FIota
 -- | FQuot [Act]
   deriving (Eq, Generic, Show)
 instance Hashable Fun

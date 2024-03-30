@@ -294,8 +294,17 @@ isScalar :: Elem -> Bool
 isScalar (EBox _) = False
 isScalar _        = True
 
+listl1 :: L a => Arr a -> Val
+listl1 (Atom a) = atoval (singletonl a)
+listl1 a        = singleton (asElem (atoval a))
+
+listl2 :: L a => Arr a -> Arr a -> Val
+listl2 (Atom a) (Atom b) = atoval (pairl a b)
+listl2 a        b        = pair (asElem (atoval a)) (asElem (atoval b))
+
 enclose :: Val -> Val
-enclose x = Elems (Atom (asElem x))
+enclose (Ints (Atom x)) = Ints (Atom x)  -- so that it doesnt become a Nums
+enclose x = unwrap (asElem x)
 
 asElem :: Val -> Elem
 asElem c@(Elems (Atom _)) = EBox c
@@ -310,10 +319,16 @@ unwrapAtomL :: L a => Arr a -> Maybe a
 unwrapAtomL (Atom x) = Just x
 unwrapAtomL _ = Nothing
 
-
 unwrap :: Elem -> Val
 unwrap (EBox a) = a
 unwrap a        = spec (atoval . Atom) a
+
+yankl :: L a => Arr a -> Maybe a
+yankl (Arr _ a) = guard (not (V.null a)) $> V.head a
+
+yank :: Val -> Maybe Val
+yank (Elems a) = unwrap <$> yankl a
+yank        a  = tfmap (fmap Atom . yankl) a
 
 isTrue :: L a => a -> Maybe Bool
 isTrue x = (0 /=) <$> toRat x
