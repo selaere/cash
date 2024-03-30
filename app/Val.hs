@@ -151,18 +151,17 @@ instance Hashable Act
 data Def = Def Fun Int
   deriving (Eq, Generic, Show)
 
---data Fun = Fun (forall m. CashMonad m => [Val] -> m [Val])
 data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
-         | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
-         | FCat | FCons | FReshape | FShape
-         | FDrop | FDup | FSwap | FRot | FOver | FShow
-         | FPick | FSelect
-         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip 
-         | FCells | FBicells | FRank | FBirank
-         | FAsInts | FAsNums | FAsChars | FAsElems
-         | FMatches | FYank | FKernel | FVector1 | FVector2 | FIota
--- | FQuot [Act]
+        | FLt | FGt | FEq | FMax | FMin | FAnd | FOr
+        | FCat | FCons | FReshape | FShape
+        | FDrop | FDup | FSwap | FRot | FOver | FShow
+        | FPick | FSelect
+        | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip 
+        | FCells | FBicells | FRank | FBirank
+        | FAsInts | FAsNums | FAsChars | FAsElems
+        | FMatches | FYank | FKernel | FVector1 | FVector2 | FIota
   deriving (Eq, Generic, Show)
+
 instance Hashable Fun
 
 type Vec a = VecL a a

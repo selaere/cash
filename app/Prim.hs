@@ -434,7 +434,7 @@ exec FDrop = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
 exec FDup  = pop  >>> fmap \    (x,xs)->   x:x:xs
 exec FSwap = pop2 >>> fmap \  (y,x,xs)->   x:y:xs
 exec FRot  = pop3 >>> fmap \(z,y,x,xs)-> x:z:y:xs
-exec FOver = pop2 >>> fmap \  (y,x,xs)-> y:x:y:xs
+exec FOver = pop2 >>> fmap \  (y,x,xs)-> x:y:x:xs
 exec FShow = mo0 (cashLog . Output . T.pack . show)
 exec FCall = pop >=> uncurry call
 exec FBoth = pop3 >=> \(q,z,y,xs) -> do xs' <- call q (y:xs); call q (z:xs')

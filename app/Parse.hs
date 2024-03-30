@@ -98,8 +98,8 @@ parseNum = label "number literal" (strand <$> signed `sepBy1` single '_')
     signed =
       option id (single '_' $> negate)                                          -- sign
       <*> ( (+)
-            <$> decimal                                                         -- integer part
-            <*> option 0 (single '.' *> (makeFrac <$> some (satisfy isDigit)))  -- rational part
+            <$> decimal                                                             -- integer part
+            <*> option 0 (try $ single '.' *> (makeFrac <$> some (satisfy isDigit)))-- rational part
           )
       where makeFrac = foldr (\x y->((toRational.digitToInt) x + y) / 10) 0
 
