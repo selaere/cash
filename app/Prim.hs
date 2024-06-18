@@ -360,6 +360,18 @@ pick a bb = tap go bb
 boolInt :: Bool -> Int64
 boolInt = toEnum . fromEnum
 
+cellwiseFold :: forall m. CashMonad m => Val -> Val -> [Val] -> m [Val]
+cellwiseFold q a xs = tap go a
+  where
+    go :: L a => Arr a -> m [Val]
+    go (Arr [] _) = cashError (NotAList a)
+    go (Arr (ax:_ ) _) | axisLength ax == 0 = cashError (ListIsEmpty a)
+    go (Arr (ax:sh) a) = St.runStateT val xs <&> uncurry (:)
+      where val = foldM step (atoval (cellAt sh a 0))
+                             (cellAt sh a <$> take (axisLength ax - 1) [1..])
+    step :: L a => Val -> Arr a -> St.StateT [Val] m Val
+    step a b = doWithStack (call q . (atoval b :) . (a :))
+
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
 
@@ -468,6 +480,7 @@ exec FVector1 = mo (pure . tap listl1)
 exec FVector2 = bi (pure .: tagree listl2)
 exec FIota    = mo \a-> fromMaybeErr (NotANumberV a) (singleRat a >>= assertInt
                     <&> \x -> list (take (fromEnum x) [0::Int64 ..]))
+exec FFold    = pop2 >=> \(q,x,xs)-> cellwiseFold q x xs
 
 rankNumberC :: CashMonad m => Val -> Val -> m Int
 rankNumberC (shape -> length -> len) r =

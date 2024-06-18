@@ -61,22 +61,22 @@ c( cells // case? cond?
 d( dip
 e( each
 f( fold
-g( group (bicells? stencil?)
-h( heads (scan)?
+g( group (stencil?)
+h( heads (scan)
 i( if
 j( (ifelse?)
 k( keep
-l(
+l( let?
 m( map
 n( if no
 o( or
 p( product outer / fixed point
 q( query
 r( reduce
-s( scan? shaped (rank)?
+s( shaped (rank)
 t( times
 u( until
-v( vector 
+v( vector
 w( while
 x( exclude (filter)
 y( if yes
