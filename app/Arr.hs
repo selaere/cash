@@ -170,8 +170,7 @@ firstCellL (Arr [] _) = Nothing
 --unconsCell (Arr (Ixd n : sh) a) = Just (on bimap Arr sh (Ixd (n-1) : sh)
 --                                                     (V.splitAt (axesSize sh) a))
 ----unconsCell (Arr (Ixd n : sh) a) = Just (on (,) Arr (sh, Ixd (n-1) : sh) <<*>> V.splitAt (axesSize sh) a)
---unconsCell (Quot (a:as)) = Just (Atom a, Quot as)
---unconsCell _ = Nothing
+--unconsCell (Quot (a:as)) = Just (Atom a, Quot a--unconsCell _ = Nothing
 
 cellAtV :: L a => [Axis] -> Vec a -> Int -> Vec a
 cellAtV sh a n = V.slice (n*size) size a where size = axesSize sh
@@ -487,3 +486,22 @@ reverseA :: L a => Arr a -> Arr a
 reverseA (Arr [] a) = Arr [] a
 reverseA (Arr [ax] a) = Arr [ax] (V.reverse a)
 reverseA (Arr (ax:sh) a) = Arr (ax:sh) . V.concat $ cellAtV sh a <$> reverse (take (axisLength ax) [0..])
+
+head2 :: (L a, Monad f) => f a -> Arr a -> [Int] -> f (Arr a)
+head2 f (Arr sh a) is = Arr (shgo sh is) <$> headV f (Arr sh a) is
+  where shgo (_:sh) (i:is) = Ixd (abs i) : shgo sh is
+        shgo []     (i:is) = Ixd (abs i) : shgo [] is
+        shgo sh     []     = sh
+
+headV :: forall f a. (L a, Monad f) => f a -> Arr a -> [Int] -> f (Vec a)
+headV _ (Arr _ a) [] = pure a
+headV f (Arr [] a) (i:is) = headV f (Arr [Ixd 1] a) (i:is)
+headV f (Arr ((axisLength->ax):sh) a) (i:is) = do
+  cells <- case compare i 0 of 
+    LT | -i > ax -> (++ cells) . replicate(-i-ax) . V.replicate (axesSize sh) <$> f
+    LT | True    -> pure (cellAtV sh a <$> take (-i) [ax+i..])
+    EQ           -> pure [V.empty]
+    GT | i <= ax -> pure (cellAtV sh a <$> take i [0..])
+    GT | True    -> (cells ++) . replicate (i-ax) . V.replicate (axesSize sh) <$> f
+  V.concat <$> traverse (\a'->headV f (Arr sh a') is) cells
+  where cells = cellAtV sh a <$> take ax [0..]

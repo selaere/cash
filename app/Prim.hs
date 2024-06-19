@@ -31,6 +31,7 @@ data PrimError
   | OutOfRange Val Val
   | NotAList Val
   | ListIsEmpty Val
+  | ListTooShort Val
   deriving (Eq, Show)
 
 instance Error PrimError where
@@ -414,6 +415,20 @@ exclude a b = tap2 go a b
     go (Arr [] _) _ = cashError (NotAList a)
     go _ (Arr (_:_:_) _) = cashError (NotAList a)
 
+headVal :: forall m. CashMonad m => Val -> Val -> m Val
+headVal a b = tap go b
+  where
+    go :: forall a. L a => Arr a -> m Val
+    go (Arr [] b) = go (Arr [Ixd 1] b)
+    go (Arr [_] b) = traverse ltoint (V.toList b) >>= step a
+    go (Arr (_:_:_) _) = cashError (NotAList b)
+
+    step :: Val -> [Int] -> m Val
+    step (Ints  a) b = Ints  <$> head2 (pure 0    ) a b
+    step (Nums  a) b = Nums  <$> head2 (pure (0%1)) a b
+    step (Chars a) b = Chars <$> head2 (pure ' '  ) a b
+    step a b = tfmap (\x-> head2 (cashError (ListTooShort a)) x b) a
+
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
 
@@ -492,6 +507,7 @@ exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes y <*> pur
 exec FDeshape = mo (pure . deshape)
 exec FReverse = mo (pure . tmap reverseA)
 exec FExclude = bi exclude
+exec FHead    = bi headVal
 exec FShape   = mo (pure . axesToVal . shape)
 exec FLength  = mo (pure . Ints . Atom . toEnum . axisLength . head . shape)
 exec FDrop    = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
