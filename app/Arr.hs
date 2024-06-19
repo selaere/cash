@@ -323,6 +323,9 @@ unwrap :: Elem -> Val
 unwrap (EBox a) = a
 unwrap a        = spec (atoval . Atom) a
 
+lunwrap :: L a => a -> Val
+lunwrap = unwrap . ltoelem
+
 yankl :: L a => Arr a -> Maybe a
 yankl (Arr _ a) = guard (not (V.null a)) $> V.head a
 

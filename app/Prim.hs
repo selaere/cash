@@ -246,7 +246,7 @@ map2 q a xs = tap results a <&> \(z, xs')-> buildElems (shape a) z : xs'
     results (Arr _ a) = St.runStateT (traverse step (V.toList a)) xs
     
     step :: L a => a -> St.StateT [Val] m Elem
-    step x = asElem <$> doWithStack (call q . (atoval (Atom x) :))
+    step x = asElem <$> doWithStack (call q . (lunwrap x :))
 
 zip2 :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
 zip2 q a b xs = tap2 go a b <&> uncurry (:)
@@ -256,7 +256,7 @@ zip2 q a b xs = tap2 go a b <&> uncurry (:)
       where val = fromMaybe (cashError MismatchingAxes) (lazip1_ step a b) <&> uncurry buildElems
     
     step :: (L a, L b) => a -> b -> St.StateT [Val] m Elem
-    step x y = asElem <$> doWithStack (call q . (atoval (Atom x) :) . (atoval (Atom y) :))
+    step x y = asElem <$> doWithStack (call q . (lunwrap x :) . (lunwrap y :))
 
 canInt     :: Elem -> Maybe Int64;    canInt     = \case (ENum x)->assertInt x; _ -> Nothing
 canENum    :: Elem -> Maybe Rational; canENum    = \case (ENum x)    -> Just x; _ -> Nothing
@@ -372,6 +372,16 @@ cellwiseFold q a xs = tap go a
     step :: L a => Val -> Arr a -> St.StateT [Val] m Val
     step a b = doWithStack (call q . (atoval b :) . (a :))
 
+cellwiseIdFold :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
+cellwiseIdFold q b a xs = tap go a
+  where
+    go :: L a => Arr a -> m [Val]
+    go (Arr [] _) = cashError (NotAList a)
+    go (Arr (ax:sh) a) = St.runStateT val xs <&> uncurry (:)
+      where val = foldM step b (cellAt sh a <$> take (axisLength ax) [0..])
+    step :: L a => Val -> Arr a -> St.StateT [Val] m Val
+    step a b = doWithStack (call q . (atoval b :) . (a :))
+
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
 
@@ -464,6 +474,8 @@ exec FZip     = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
 exec FCells   = pop2 >=> \(q,x,xs)->rankrel2 1 q x xs
 exec FRank    = pop3 >=> \(q,r,x,xs)->rankNumberC x r >>= \r -> rankrel2 r q x xs
 exec FBicells = pop3 >=> \(q,a,b,xs)-> birankrel2 1 1 q a b xs
+exec FFold    = pop2 >=> \(q,x,xs)-> cellwiseFold q x xs
+exec FReduce  = pop3 >=> \(q,x,y,xs)-> cellwiseIdFold q x y xs
 exec FBirank  = pop5 >=> \(q,r,r',a,b,xs)-> do r  <- rankNumberC a r
                                                r' <- rankNumberC b r'
                                                birankrel2 r r' q a b xs
@@ -480,7 +492,6 @@ exec FVector1 = mo (pure . tap listl1)
 exec FVector2 = bi (pure .: tagree listl2)
 exec FIota    = mo \a-> fromMaybeErr (NotANumberV a) (singleRat a >>= assertInt
                     <&> \x -> list (take (fromEnum x) [0::Int64 ..]))
-exec FFold    = pop2 >=> \(q,x,xs)-> cellwiseFold q x xs
 
 rankNumberC :: CashMonad m => Val -> Val -> m Int
 rankNumberC (shape -> length -> len) r =
