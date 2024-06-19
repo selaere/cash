@@ -390,12 +390,12 @@ asElems :: Val -> Arr Elem
 asElems = tap (mapArr ltoelem)
 
 construct :: Val -> Val -> Maybe Val
-construct (Quot a) b = Just (Quot (asElem b : a))
+construct a (Quot b) = Just (Quot (asElem a : b))
 construct a b = tzip go a b
   where
     --go :: Arr a -> Arr a -> Maybe (Arr a)
     go (Atom a) (Atom b) = Just (pairl a b)
-    go (Arr (Ixd n : sh) a) (Arr sh' b) | sh == sh' = Just (Arr (Ixd (n+1) : sh) (b V.++ a))
+    go (Arr sh a) (Arr (Ixd n : sh') b) | sh == sh' = Just (Arr (Ixd (n+1) : sh) (a V.++ b))
     go _ _ = Nothing
 --construct (Arr (Ixd n : sh) a) (Arr' sh' b) | sh == sh' = Just (Arr (Ixd (n + 1) : sh) (b V.++ a))
 --construct _ _ = Nothing
