@@ -303,8 +303,12 @@ listl2 (Atom a) (Atom b) = atoval (pairl a b)
 listl2 a        b        = pair (asElem (atoval a)) (asElem (atoval b))
 
 enclose :: Val -> Val
-enclose (Ints (Atom x)) = Ints (Atom x)  -- so that it doesnt become a Nums
-enclose x = unwrap (asElem x)
+enclose c@(Ints    (Atom _)) = c
+enclose c@(Nums    (Atom _)) = c
+enclose c@(Chars   (Atom _)) = c
+enclose c@(Symbols (Atom _)) = c
+enclose c@(Paths   (Atom _)) = c
+enclose x = Elems (Atom (asElem x))
 
 asElem :: Val -> Elem
 asElem c@(Elems (Atom _)) = EBox c

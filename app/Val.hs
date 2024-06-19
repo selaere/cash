@@ -157,7 +157,7 @@ data Fun = FAdd | FSub | FMul | FDiv | FDivi | FNot | FMod | FPow
         | FDrop | FDup | FSwap | FRot | FOver | FShow
         | FPick | FSelect
         | FCall | FBoth | FDip | FKeep | FIf | FWhile | FTimes | FMap | FZip 
-        | FCells | FBicells | FRank | FBirank | FFold | FReduce
+        | FCells | FBicells | FRank | FBirank | FFold | FReduce | FScan
         | FAsInts | FAsNums | FAsChars | FAsElems
         | FMatches | FYank | FKernel | FVector1 | FVector2 | FIota
   deriving (Eq, Generic, Show)

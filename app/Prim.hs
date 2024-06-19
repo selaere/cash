@@ -299,7 +299,7 @@ birankrel2 r r' q a b xs = tap2 go a b
     step x y = doWithStack (call q . (atoval x :) . (atoval y :))
 
 buildVals :: CashMonad m => [Axis] -> Val -> [Val] -> m Val
-buildVals nlsh first z = 
+buildVals nlsh first z =
   unless (all ((nrsh ==) . shape) z) (cashError MismatchingAxes) $>
   case first of
     Ints    _ -> build canInts (build canNums elems)
@@ -379,6 +379,21 @@ cellwiseIdFold q b a xs = tap go a
     go (Arr [] _) = cashError (NotAList a)
     go (Arr (ax:sh) a) = St.runStateT val xs <&> uncurry (:)
       where val = foldM step b (cellAt sh a <$> take (axisLength ax) [0..])
+    step :: L a => Val -> Arr a -> St.StateT [Val] m Val
+    step a b = doWithStack (call q . (atoval b :) . (a :))
+
+cellwiseIdScan :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
+cellwiseIdScan q b a xs = tap go a
+  where
+    go :: forall a. L a => Arr a -> m [Val]
+    go (Arr []      _) = cashError (NotAList a)
+    go (Arr (ax:sh) a) = uncurry (:) <$> St.runStateT val xs
+      where
+        val = loop b (cellAt sh a <$> take (axisLength ax) [0..]) >>= buildVals [ax] b
+        loop _ []     = pure []
+        loop a (b:bs) = do v  <- step a b
+                           vs <- loop v bs
+                           return (v:vs)
     step :: L a => Val -> Arr a -> St.StateT [Val] m Val
     step a b = doWithStack (call q . (atoval b :) . (a :))
 
@@ -476,6 +491,7 @@ exec FRank    = pop3 >=> \(q,r,x,xs)->rankNumberC x r >>= \r -> rankrel2 r q x x
 exec FBicells = pop3 >=> \(q,a,b,xs)-> birankrel2 1 1 q a b xs
 exec FFold    = pop2 >=> \(q,x,xs)-> cellwiseFold q x xs
 exec FReduce  = pop3 >=> \(q,x,y,xs)-> cellwiseIdFold q x y xs
+exec FScan    = pop3 >=> \(q,x,y,xs)-> cellwiseIdScan q x y xs
 exec FBirank  = pop5 >=> \(q,r,r',a,b,xs)-> do r  <- rankNumberC a r
                                                r' <- rankNumberC b r'
                                                birankrel2 r r' q a b xs
