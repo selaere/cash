@@ -71,7 +71,7 @@ parseIdent = do
     , Literal head <$> parseLit
     , \case
         '{' -> OPush head
-        '|' -> OPeek head
+        '\\'-> OPeek head
         '}' -> OPop  head
         x   -> Cmd (T.snoc head x)
       <$> label "identifier ending" (satisfy ending) ]

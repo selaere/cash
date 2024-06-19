@@ -18,12 +18,12 @@ $ label/var
 > great
 ? equals
 @ swap nth
-\ or
+\ r@
 ^ call/comb
 _ in_ident, neg _123, _ line comment
 ` show/lit
 { >r
-| r@
+| or
 } r>
 ~ not?
 
