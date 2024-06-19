@@ -385,7 +385,7 @@ cellwiseIdFold q b a xs = tap go a
 cellwiseIdScan :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
 cellwiseIdScan q b a xs = tap go a
   where
-    go :: forall a. L a => Arr a -> m [Val]
+    go :: L a => Arr a -> m [Val]
     go (Arr []      _) = cashError (NotAList a)
     go (Arr (ax:sh) a) = uncurry (:) <$> St.runStateT val xs
       where
@@ -396,6 +396,23 @@ cellwiseIdScan q b a xs = tap go a
                            return (v:vs)
     step :: L a => Val -> Arr a -> St.StateT [Val] m Val
     step a b = doWithStack (call q . (atoval b :) . (a :))
+
+exclude :: forall m. CashMonad m => Val -> Val -> m Val
+exclude a b = tap2 go a b
+  where
+    go :: forall a b. (L a, L b) => Arr a -> Arr b -> m Val
+    go (Arr (Ixd len:sh) a) (Arr [Ixd len'] b)
+      | len == len' = do b <- traverse ltoint (V.toList b)
+                         let val = zipWith replicate b (cellAtV sh a <$> take len [0..])
+                         return $ atoval (Arr (Ixd (length val):sh) (V.concat (join val)))
+      | otherwise = cashError MismatchingAxes
+    go (Arr (Ixd len:sh) a) (Arr [] (V.head -> b)) = ltoint b >>= \b->
+      return . atoval . Arr (Ixd (len*b):sh) . V.concat . join $
+        replicate b . cellAtV sh a <$> take len [0..]
+    go (Arr (ax@(Nmd _):sh) a) b = go (Arr (Ixd (axisLength ax):sh) a) b
+    go a (Arr (ax@(Nmd _):sh) b) = go a (Arr (Ixd (axisLength ax):sh) b)
+    go (Arr [] _) _ = cashError (NotAList a)
+    go _ (Arr (_:_:_) _) = cashError (NotAList a)
 
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
@@ -447,6 +464,12 @@ powr :: Rational -> Rational -> Rational
 powr x y | denominator y == 1 = x^numerator y
          | otherwise          = toRational (on (**) fromRational x y :: Double)
 
+ltoint :: (L a, CashMonad m) => a -> m Int
+ltoint n = do
+  n <- fromMaybeErr (NotANumber (ltoelem n)) (toRat n)
+  when (denominator n /= 1) (cashError (NotAnInteger (Nums (Atom n))))
+  return (fromEnum (numerator n))
+
 exec :: CashMonad m => Fun -> [Val] -> m [Val]
 exec FAdd     = bi add
 exec FSub     = bi sub
@@ -466,6 +489,9 @@ exec FNot     = mo (monum (pure . toRational . fromEnum . (== 0)))
 exec FCat     = bi (fromMaybeErr ShapeError .: catenate)
 exec FCons    = bi (fromMaybeErr ShapeError .: construct)
 exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes y <*> pure x)
+exec FDeshape = mo (pure . deshape)
+exec FReverse = mo (pure . tmap reverseA)
+exec FExclude = bi exclude
 exec FShape   = mo (pure . axesToVal . shape)
 exec FLength  = mo (pure . Ints . Atom . toEnum . axisLength . head . shape)
 exec FDrop    = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
@@ -481,9 +507,8 @@ exec FDip     = pop2 >=> \(q,z,xs)-> do xs' <- call q    xs ; return (z:xs')
 exec FKeep    = pop2 >=> \(q,z,xs)-> do xs' <- call q (z:xs); return (z:xs')
 exec FWhile   = pop2 >=> \(q,p,xs)->while q p xs
 exec FTimes   = pop2 >=> \(q,n,xs)->
-  do n <- fromMaybeErr (NotANumberV n) (unwrapAtom n >>= toRat)
-     when (denominator n /= 1) (cashError (NotAnInteger (Nums (Atom n))))
-     foldM (\xs' ()-> call q xs') xs (replicate (fromEnum (numerator n)) ())
+  do n <- fromMaybeErr (NotANumberV n) (unwrapAtom n) >>= ltoint
+     foldM (\xs' ()-> call q xs') xs (replicate n ())
 exec FMap     = pop2 >=> \(q,x,xs)->map2 q x xs
 exec FZip     = pop3 >=> \(q,x,y,xs)->zip2 q x y xs
 exec FCells   = pop2 >=> \(q,x,xs)->rankrel2 1 q x xs

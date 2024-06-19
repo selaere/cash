@@ -181,7 +181,7 @@ cellAt sh a n = Arr sh (cellAtV sh a n)
 
 rankRel :: (Applicative m, L a, L b) => Int -> [Axis] -> (Arr a -> m (Vec b)) -> Arr a -> m (Arr b)
 rankRel r newsh f (Arr sh a) =
-  Arr (lsh <> newsh) . V.concat <$> traverse (f . cellAt rsh a) [0..axesSize lsh]
+  Arr (lsh <> newsh) . V.concat <$> traverse (f . cellAt rsh a) (take (axesSize lsh) [0..])
   where (lsh,rsh) = splitAt r sh
 
 
@@ -482,3 +482,8 @@ axesToVal sh = if all isIxd sh then Ints (listl (fromIntegral . axisLength <$> s
                                else list (axisToElem <$> sh)
   where isIxd (Ixd _) = True
         isIxd (Nmd _) = False
+
+reverseA :: L a => Arr a -> Arr a
+reverseA (Arr [] a) = Arr [] a
+reverseA (Arr [ax] a) = Arr [ax] (V.reverse a)
+reverseA (Arr (ax:sh) a) = Arr (ax:sh) . V.concat $ cellAtV sh a <$> reverse (take (axisLength ax) [0..])
