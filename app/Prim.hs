@@ -378,8 +378,8 @@ cellwiseIdFold q b a xs = tap go a
   where
     go :: L a => Arr a -> m [Val]
     go (Arr [] _) = cashError (NotAList a)
-    go (Arr (ax:sh) a) = St.runStateT val xs <&> uncurry (:)
-      where val = foldM step b (cellAt sh a <$> take (axisLength ax) [0..])
+    go aa = St.runStateT val xs <&> uncurry (:)
+      where val = foldM step b (cells aa)
     step :: L a => Val -> Arr a -> St.StateT [Val] m Val
     step a b = doWithStack (call q . (atoval b :) . (a :))
 
@@ -387,10 +387,10 @@ cellwiseIdScan :: forall m. CashMonad m => Val -> Val -> Val -> [Val] -> m [Val]
 cellwiseIdScan q b a xs = tap go a
   where
     go :: L a => Arr a -> m [Val]
-    go (Arr []      _) = cashError (NotAList a)
-    go (Arr (ax:sh) a) = uncurry (:) <$> St.runStateT val xs
+    go    (Arr []     _) = cashError (NotAList a)
+    go aa@(Arr (ax:_) _) = uncurry (:) <$> St.runStateT val xs
       where
-        val = loop b (cellAt sh a <$> take (axisLength ax) [0..]) >>= buildVals [ax] b
+        val = loop b (cells aa) >>= buildVals [ax] b
         loop _ []     = pure []
         loop a (b:bs) = do v  <- step a b
                            vs <- loop v bs
@@ -402,14 +402,13 @@ exclude :: forall m. CashMonad m => Val -> Val -> m Val
 exclude a b = tap2 go a b
   where
     go :: forall a b. (L a, L b) => Arr a -> Arr b -> m Val
-    go (Arr (Ixd len:sh) a) (Arr [Ixd len'] b)
+    go aa@(Arr (Ixd len:sh) _) (Arr [Ixd len'] b)
       | len == len' = do b <- traverse ltoint (V.toList b)
-                         let val = zipWith replicate b (cellAtV sh a <$> take len [0..])
+                         let val = zipWith replicate b (cellsV aa)
                          return $ atoval (Arr (Ixd (length val):sh) (V.concat (join val)))
       | otherwise = cashError MismatchingAxes
-    go (Arr (Ixd len:sh) a) (Arr [] (V.head -> b)) = ltoint b >>= \b->
-      return . atoval . Arr (Ixd (len*b):sh) . V.concat . join $
-        replicate b . cellAtV sh a <$> take len [0..]
+    go aa@(Arr (Ixd len:sh) _) (Arr [] (V.head -> b)) = ltoint b <&> \b->
+      atoval (Arr (Ixd (len*b):sh) (V.concat (cellsV aa >>= replicate b)))
     go (Arr (ax@(Nmd _):sh) a) b = go (Arr (Ixd (axisLength ax):sh) a) b
     go a (Arr (ax@(Nmd _):sh) b) = go a (Arr (Ixd (axisLength ax):sh) b)
     go (Arr [] _) _ = cashError (NotAList a)

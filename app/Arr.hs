@@ -485,23 +485,48 @@ axesToVal sh = if all isIxd sh then Ints (listl (fromIntegral . axisLength <$> s
 reverseA :: L a => Arr a -> Arr a
 reverseA (Arr [] a) = Arr [] a
 reverseA (Arr [ax] a) = Arr [ax] (V.reverse a)
-reverseA (Arr (ax:sh) a) = Arr (ax:sh) . V.concat $ cellAtV sh a <$> reverse (take (axisLength ax) [0..])
+reverseA aa@(Arr sh _) = Arr sh (V.concat (reverse (cellsV aa)))
+
+takeKeys, dropKeys :: Int -> Bivector v -> Bivector v
+takeKeys i (Bivector nms ei) = Bivector (V.take i                  nms) (V.foldr HM.delete ei (V.drop i nms))
+dropKeys i (Bivector nms ei) = Bivector (V.drop (V.length nms - i) nms) (V.foldr HM.delete ei (V.take i nms))
+
+cellsV :: L a => Arr a -> [Vec a]
+cellsV (Arr (sh:sh') a) = cellAtV sh' a <$> take (axisLength sh) [0..]
+cellsV (Arr [] a) = [a]
+
+cells :: L a => Arr a -> [Arr a]
+cells (Arr (sh:sh') a) = cellAt sh' a <$> take (axisLength sh) [0..]
+cells (Arr [] a) = [Arr [] a]
 
 head2 :: (L a, Monad f) => f a -> Arr a -> [Int] -> f (Arr a)
 head2 f (Arr sh a) is = Arr (shgo sh is) <$> headV f (Arr sh a) is
-  where shgo (_:sh) (i:is) = Ixd (abs i) : shgo sh is
-        shgo []     (i:is) = Ixd (abs i) : shgo [] is
-        shgo sh     []     = sh
+  where 
+    shgo (Nmd bv:sh) (i:is) | i < 0 = Nmd (dropKeys(-i)bv) : shgo sh is
+                            | True  = Nmd (takeKeys  i bv) : shgo sh is
+    shgo (Ixd _:sh) (i:is) = Ixd (abs i) : shgo sh is
+    shgo []         (i:is) = Ixd (abs i) : shgo [] is
+    shgo sh         []     = sh
 
 headV :: forall f a. (L a, Monad f) => f a -> Arr a -> [Int] -> f (Vec a)
 headV _ (Arr _ a) [] = pure a
 headV f (Arr [] a) (i:is) = headV f (Arr [Ixd 1] a) (i:is)
-headV f (Arr ((axisLength->ax):sh) a) (i:is) = do
-  cells <- case compare i 0 of 
+headV f aa@(Arr (Ixd ax:sh) _) (i:is) = do
+  c <- case compare i 0 of 
     LT | -i > ax -> (++ cells) . replicate(-i-ax) . V.replicate (axesSize sh) <$> f
-    LT | True    -> pure (cellAtV sh a <$> take (-i) [ax+i..])
+    LT | True    -> pure (drop (ax+i) cells)
     EQ           -> pure [V.empty]
-    GT | i <= ax -> pure (cellAtV sh a <$> take i [0..])
+    GT | i <= ax -> pure (take i cells)
     GT | True    -> (cells ++) . replicate (i-ax) . V.replicate (axesSize sh) <$> f
-  V.concat <$> traverse (\a'->headV f (Arr sh a') is) cells
-  where cells = cellAtV sh a <$> take ax [0..]
+  V.concat <$> traverse (\a'->headV f (Arr sh a') is) c
+  where cells = cellsV (aa)
+headV f aa@(Arr (Nmd bv:sh) _) (i:is) = let
+  c = case compare i 0 of 
+    LT | -i > ax -> cells
+    LT | True    -> drop (ax+i) cells
+    EQ           -> [V.empty]
+    GT | i <= ax -> take i cells
+    GT | True    -> cells
+  in V.concat <$> traverse (\a'->headV f (Arr sh a') is) c
+  where ax = axisLength (Nmd bv)
+        cells = cellsV (aa)
