@@ -488,8 +488,8 @@ reverseA (Arr [ax] a) = Arr [ax] (V.reverse a)
 reverseA aa@(Arr sh _) = Arr sh (V.concat (reverse (cellsV aa)))
 
 takeKeys, dropKeys :: Int -> Bivector v -> Bivector v
-takeKeys i (Bivector nms ei) = Bivector (V.take i                  nms) (V.foldr HM.delete ei (V.drop i nms))
-dropKeys i (Bivector nms ei) = Bivector (V.drop (V.length nms - i) nms) (V.foldr HM.delete ei (V.take i nms))
+takeKeys i (Bivector nms ei) = Bivector (V.take i nms) (V.foldr HM.delete ei (V.drop i nms))
+dropKeys i (Bivector nms ei) = Bivector (V.drop i nms) (V.foldr HM.delete ei (V.take i nms))
 
 cellsV :: L a => Arr a -> [Vec a]
 cellsV (Arr (sh:sh') a) = cellAtV sh' a <$> take (axisLength sh) [0..]
@@ -502,8 +502,8 @@ cells (Arr [] a) = [Arr [] a]
 head2 :: (L a, Monad f) => f a -> Arr a -> [Int] -> f (Arr a)
 head2 f (Arr sh a) is = Arr (shgo sh is) <$> headV f (Arr sh a) is
   where 
-    shgo (Nmd bv:sh) (i:is) | i < 0 = Nmd (dropKeys(-i)bv) : shgo sh is
-                            | True  = Nmd (takeKeys  i bv) : shgo sh is
+    shgo (Nmd bv:sh) (i:is) | i < 0 = Nmd (dropKeys (axisLength (Nmd bv)+i) bv) : shgo sh is
+                            | True  = Nmd (takeKeys i bv) : shgo sh is
     shgo (Ixd _:sh) (i:is) = Ixd (abs i) : shgo sh is
     shgo []         (i:is) = Ixd (abs i) : shgo [] is
     shgo sh         []     = sh
@@ -530,3 +530,21 @@ headV f aa@(Arr (Nmd bv:sh) _) (i:is) = let
   in V.concat <$> traverse (\a'->headV f (Arr sh a') is) c
   where ax = axisLength (Nmd bv)
         cells = cellsV (aa)
+
+tail2 :: L a => [Int] -> Arr a -> Arr a
+tail2 is aa@(Arr sh _) = Arr (shgo is sh) (tailV is aa)
+  where
+    shgo (i:is) (Nmd bv:sh) | i < 0 = Nmd (takeKeys (axisLength (Nmd bv)+i) bv) : shgo is sh
+                            | True  = Nmd (dropKeys i bv) : shgo is sh
+    shgo (i:is) (Ixd ax:sh) = Ixd (max 0 (ax-abs i)) : shgo is sh
+    shgo (i:is) []          = Ixd (max 0 (1 -abs i)) : shgo is []
+    shgo []     sh          = sh
+
+tailV :: L a => [Int] -> Arr a -> Vec a
+tailV [] (Arr _ a) = a
+tailV (i:is) (Arr [] a) = tailV (i:is) (Arr [Ixd 1] a)
+tailV (i:is) aa@(Arr ((axisLength->ax):sh) _) =
+  V.concat (c (cellsV aa) <&> \a'->tailV is (Arr sh a'))
+  where c = case compare i 0 of LT -> take (ax+i)
+                                EQ -> id
+                                GT -> drop i

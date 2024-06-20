@@ -428,6 +428,14 @@ headVal a b = tap go b
     step (Chars a) b = Chars <$> head2 (pure ' '  ) a b
     step a b = tfmap (\x-> head2 (cashError (ListTooShort a)) x b) a
 
+tailVal :: forall m. CashMonad m => Val -> Val -> m Val
+tailVal a b = tap go b
+  where
+    go :: forall a. L a => Arr a -> m Val
+    go (Arr [] b) = go (Arr [Ixd 1] b)
+    go (Arr [_] b) = do traverse ltoint (V.toList b) <&> \b -> tmap (tail2 b) a
+    go (Arr (_:_:_) _) = cashError (NotAList b)
+
 ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
 ufbinum f = binum (pure .: f)
 
@@ -507,6 +515,7 @@ exec FDeshape = mo (pure . deshape)
 exec FReverse = mo (pure . tmap reverseA)
 exec FExclude = bi exclude
 exec FHead    = bi headVal
+exec FTail    = bi tailVal
 exec FShape   = mo (pure . axesToVal . shape)
 exec FLength  = mo (pure . Ints . Atom . toEnum . axisLength . head . shape)
 exec FDrop    = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}
