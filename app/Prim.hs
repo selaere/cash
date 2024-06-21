@@ -414,33 +414,26 @@ exclude a b = tap2 go a b
     go (Arr [] _) _ = cashError (NotAList a)
     go _ (Arr (_:_:_) _) = cashError (NotAList a)
 
-headVal :: forall m. CashMonad m => Val -> Val -> m Val
-headVal a b = tap go b
+getInts :: forall m. CashMonad m => Val -> m [Int]
+getInts b = tap go b
   where
-    go :: forall a. L a => Arr a -> m Val
+    go :: forall a. Arr a -> m [Int]
     go (Arr [] b) = go (Arr [Ixd 1] b)
-    go (Arr [_] b) = traverse ltoint (V.toList b) >>= step a
+    go (Arr [_] b) = traverse ltoint (V.toList b)
     go (Arr (_:_:_) _) = cashError (NotAList b)
 
+headValFill :: forall m. CashMonad m => Val -> Val -> m Val
+headValFill a b = getInts b >>= step a
+  where
     step :: Val -> [Int] -> m Val
-    step (Ints  a) b = Ints  <$> head2 (pure 0    ) a b
-    step (Nums  a) b = Nums  <$> head2 (pure (0%1)) a b
-    step (Chars a) b = Chars <$> head2 (pure ' '  ) a b
-    step a b = tfmap (\x-> head2 (cashError (ListTooShort a)) x b) a
+    step (Ints  a) is = Ints  <$> head2F (pure 0    ) is a
+    step (Nums  a) is = Nums  <$> head2F (pure (0%1)) is a
+    step (Chars a) is = Chars <$> head2F (pure ' '  ) is a
+    step a is = tfmap (head2F (cashError (ListTooShort a)) is) a
 
-tailVal :: forall m. CashMonad m => Val -> Val -> m Val
-tailVal a b = tap go b
-  where
-    go :: forall a. L a => Arr a -> m Val
-    go (Arr [] b) = go (Arr [Ixd 1] b)
-    go (Arr [_] b) = do traverse ltoint (V.toList b) <&> \b -> tmap (tail2 b) a
-    go (Arr (_:_:_) _) = cashError (NotAList b)
-
-ufbinum :: CashMonad m => (Rational -> Rational -> Rational) -> Val -> Val -> m Val
-ufbinum f = binum (pure .: f)
-
-ufmonum :: CashMonad m => (Rational -> Rational) -> Val -> m Val
-ufmonum f = monum (pure . f)
+headVal, tailVal :: forall m. CashMonad m => Val -> Val -> m Val
+headVal a is = getInts is <&> \is -> tmap (head2 is) a
+tailVal a is = getInts is <&> \is -> tmap (tail2 is) a
 
 pop :: CashMonad m => [Val] -> m (Val,[Val])
 pop (x:xs) = pure (x,xs)
@@ -515,6 +508,7 @@ exec FDeshape = mo (pure . deshape)
 exec FReverse = mo (pure . tmap reverseA)
 exec FExclude = bi exclude
 exec FHead    = bi headVal
+exec FZeroHead= bi headValFill
 exec FTail    = bi tailVal
 exec FShape   = mo (pure . axesToVal . shape)
 exec FLength  = mo (pure . Ints . Atom . toEnum . axisLength . head . shape)

@@ -166,12 +166,6 @@ firstCellL :: Arr a -> Maybe (Arr a)
 firstCellL (Arr (_ : sh) a) = Just (Arr sh (V.take (axesSize sh) a))
 firstCellL (Arr [] _) = Nothing
 
---unconsCell :: Val -> Maybe (Val, Val)
---unconsCell (Arr (Ixd n : sh) a) = Just (on bimap Arr sh (Ixd (n-1) : sh)
---                                                     (V.splitAt (axesSize sh) a))
-----unconsCell (Arr (Ixd n : sh) a) = Just (on (,) Arr (sh, Ixd (n-1) : sh) <<*>> V.splitAt (axesSize sh) a)
---unconsCell (Quot (a:as)) = Just (Atom a, Quot a--unconsCell _ = Nothing
-
 cellAtV :: L a => [Axis] -> Vec a -> Int -> Vec a
 cellAtV sh a n = V.slice (n*size) size a where size = axesSize sh
 
@@ -499,52 +493,52 @@ cells :: L a => Arr a -> [Arr a]
 cells (Arr (sh:sh') a) = cellAt sh' a <$> take (axisLength sh) [0..]
 cells (Arr [] a) = [Arr [] a]
 
-head2 :: (L a, Monad f) => f a -> Arr a -> [Int] -> f (Arr a)
-head2 f (Arr sh a) is = Arr (shgo sh is) <$> headV f (Arr sh a) is
-  where 
-    shgo (Nmd bv:sh) (i:is) | i < 0 = Nmd (dropKeys (axisLength (Nmd bv)+i) bv) : shgo sh is
-                            | True  = Nmd (takeKeys i bv) : shgo sh is
-    shgo (Ixd _:sh) (i:is) = Ixd (abs i) : shgo sh is
-    shgo []         (i:is) = Ixd (abs i) : shgo [] is
-    shgo sh         []     = sh
-
-headV :: forall f a. (L a, Monad f) => f a -> Arr a -> [Int] -> f (Vec a)
-headV _ (Arr _ a) [] = pure a
-headV f (Arr [] a) (i:is) = headV f (Arr [Ixd 1] a) (i:is)
-headV f aa@(Arr (Ixd ax:sh) _) (i:is) = do
-  c <- case compare i 0 of 
-    LT | -i > ax -> (++ cells) . replicate(-i-ax) . V.replicate (axesSize sh) <$> f
-    LT | True    -> pure (drop (ax+i) cells)
-    EQ           -> pure [V.empty]
-    GT | i <= ax -> pure (take i cells)
-    GT | True    -> (cells ++) . replicate (i-ax) . V.replicate (axesSize sh) <$> f
-  V.concat <$> traverse (\a'->headV f (Arr sh a') is) c
-  where cells = cellsV (aa)
-headV f aa@(Arr (Nmd bv:sh) _) (i:is) = let
-  c = case compare i 0 of 
-    LT | -i > ax -> cells
-    LT | True    -> drop (ax+i) cells
-    EQ           -> [V.empty]
-    GT | i <= ax -> take i cells
-    GT | True    -> cells
-  in V.concat <$> traverse (\a'->headV f (Arr sh a') is) c
-  where ax = axisLength (Nmd bv)
-        cells = cellsV (aa)
-
-tail2 :: L a => [Int] -> Arr a -> Arr a
-tail2 is aa@(Arr sh _) = Arr (shgo is sh) (tailV is aa)
+head2F :: forall a f. (L a, Monad f) => f a-> [Int] -> Arr a -> f (Arr a)
+head2F f is (Arr sh a) = Arr (shgo sh is) <$> vgo is (Arr sh a)
   where
-    shgo (i:is) (Nmd bv:sh) | i < 0 = Nmd (takeKeys (axisLength (Nmd bv)+i) bv) : shgo is sh
-                            | True  = Nmd (dropKeys i bv) : shgo is sh
+    shgo (_:sh) (i:is) = Ixd (abs i) : shgo sh is
+    shgo []     (i:is) = Ixd (abs i) : shgo [] is
+    shgo sh     []     = sh
+  
+    vgo :: [Int] -> Arr a -> f (Vec a)
+    vgo [] (Arr _ a) = pure a
+    vgo is (Arr [] a) = vgo is (Arr [Ixd 1] a) 
+    vgo (i:is) aa@(Arr ((axisLength->ax):sh) _)  = do
+      c <- case compare i 0 of 
+        LT | -i > ax -> (++ cells) . replicate(-i-ax) . V.replicate (axesSize sh) <$> f
+        LT | True    -> pure (drop (ax+i) cells)
+        EQ           -> pure [V.empty]
+        GT | i <= ax -> pure (take i cells)
+        GT | True    -> (cells ++) . replicate (i-ax) . V.replicate (axesSize sh) <$> f
+      V.concat <$> traverse (vgo is . Arr sh) c
+      where cells = cellsV aa
+
+head2 :: forall a. L a => [Int] -> Arr a -> Arr a
+head2 is (Arr sh a) = Arr (shgo is sh) (vgo is (Arr sh a))
+  where
+    shgo (i:is) (Nmd bv:sh) | i < 0     = Nmd (dropKeys (axisLength (Nmd bv)+i) bv) : shgo is sh
+                            | otherwise = Nmd (takeKeys i bv) : shgo is sh
+    shgo (i:is) (Ixd ax:sh) = Ixd (max ax (abs i)) : shgo is sh
+    shgo (i:is) []          = Ixd (abs i) : shgo is []
+    shgo []     sh          = sh
+
+    vgo :: [Int] -> Arr a -> Vec a
+    vgo [] (Arr _ a) = a
+    vgo (i:is) (Arr [] a) = vgo (i:is) (Arr [Ixd 1] a)
+    vgo (i:is) aa@(Arr ((axisLength->ax):sh) _) = V.concat (vgo is . Arr sh <$> c (cellsV aa))
+      where c = if i < 0 then drop (ax+i) else take i
+
+tail2 :: forall a. L a => [Int] -> Arr a -> Arr a
+tail2 is aa@(Arr sh _) = Arr (shgo is sh) (vgo is aa)
+  where
+    shgo (i:is) (Nmd bv:sh) | i < 0     = Nmd (takeKeys (axisLength (Nmd bv)+i) bv) : shgo is sh
+                            | otherwise = Nmd (dropKeys i bv) : shgo is sh
     shgo (i:is) (Ixd ax:sh) = Ixd (max 0 (ax-abs i)) : shgo is sh
     shgo (i:is) []          = Ixd (max 0 (1 -abs i)) : shgo is []
     shgo []     sh          = sh
 
-tailV :: L a => [Int] -> Arr a -> Vec a
-tailV [] (Arr _ a) = a
-tailV (i:is) (Arr [] a) = tailV (i:is) (Arr [Ixd 1] a)
-tailV (i:is) aa@(Arr ((axisLength->ax):sh) _) =
-  V.concat (c (cellsV aa) <&> \a'->tailV is (Arr sh a'))
-  where c = case compare i 0 of LT -> take (ax+i)
-                                EQ -> id
-                                GT -> drop i
+    vgo :: [Int] -> Arr a -> Vec a
+    vgo [] (Arr _ a) = a
+    vgo (i:is) (Arr [] a) = vgo (i:is) (Arr [Ixd 1] a)
+    vgo (i:is) aa@(Arr ((axisLength->ax):sh) _) = V.concat (vgo is . Arr sh <$> c (cellsV aa))
+      where c = if i < 0 then take (ax+i) else drop i
