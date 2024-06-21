@@ -431,9 +431,10 @@ headValFill a b = getInts b >>= step a
     step (Chars a) is = Chars <$> head2F (pure ' '  ) is a
     step a is = tfmap (head2F (cashError (ListTooShort a)) is) a
 
-headVal, tailVal :: forall m. CashMonad m => Val -> Val -> m Val
-headVal a is = getInts is <&> \is -> tmap (head2 is) a
-tailVal a is = getInts is <&> \is -> tmap (tail2 is) a
+headVal, tailVal, nudgeVal :: forall m. CashMonad m => Val -> Val -> m Val
+headVal  a is = getInts is <&> \is -> tmap (head2 is) a
+tailVal  a is = getInts is <&> \is -> tmap (tail2 is) a
+nudgeVal a is = getInts is <&> \is -> tmap (nudge is) a
 
 pop :: CashMonad m => [Val] -> m (Val,[Val])
 pop (x:xs) = pure (x,xs)
@@ -494,7 +495,7 @@ exec FLt      = bi (compOp (boolInt.:(<)) )
 exec FEq      = bi (compOp (boolInt.:(==)))
 exec FGt      = bi (compOp (boolInt.:(>)) )
 exec FDivi    = bi (overflowingOp (\x y->toRational (floor (x/y) :: Integer)) quotS)
-exec FMod     = bi (overflowingOp (\x y-> x-y*(floor (x/y) % 1)) (Just .: rem))
+exec FMod     = bi (overflowingOp (\x y-> x-y*(floor (x/y) % 1)) (Just .: mod))
 exec FPow     = bi (overflowingOp powr (overflow (^)))
 exec FMax     = bi (agreeOp max max max)
 exec FMin     = bi (agreeOp min min min)
@@ -507,9 +508,10 @@ exec FReshape = bi \x y -> fromMaybeErr ShapeError (reshape <$> asAxes y <*> pur
 exec FDeshape = mo (pure . deshape)
 exec FReverse = mo (pure . tmap reverseA)
 exec FExclude = bi exclude
-exec FHead    = bi headVal
+exec FHead    = bi \a is -> getInts is <&> \is -> tmap (head2 is) a
 exec FZeroHead= bi headValFill
-exec FTail    = bi tailVal
+exec FTail    = bi \a is -> getInts is <&> \is -> tmap (tail2 is) a
+exec FNudge   = bi \a is -> getInts is <&> \is -> tmap (nudge is) a
 exec FShape   = mo (pure . axesToVal . shape)
 exec FLength  = mo (pure . Ints . Atom . toEnum . axisLength . head . shape)
 exec FDrop    = pop  >>> fmap \    (_,xs)->       xs  {- HLINT ignore -}

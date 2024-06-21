@@ -542,3 +542,13 @@ tail2 is aa@(Arr sh _) = Arr (shgo is sh) (vgo is aa)
     vgo (i:is) (Arr [] a) = vgo (i:is) (Arr [Ixd 1] a)
     vgo (i:is) aa@(Arr ((axisLength->ax):sh) _) = V.concat (vgo is . Arr sh <$> c (cellsV aa))
       where c = if i < 0 then take (ax+i) else drop i
+
+nudge :: forall a. L a => [Int] -> Arr a -> Arr a
+nudge is aa@(Arr sh _) = Arr sh (vgo is aa)
+  where
+    vgo :: [Int] -> Arr a -> Vec a
+    vgo [] (Arr _ a) = a
+    vgo _ (Arr [] a) = a
+    vgo (i:is) aa@(Arr ((axisLength->ax):sh) _) = V.concat (vgo is . Arr sh <$> c)
+      where i' = (-i) `mod` ax
+            c = drop i' (cellsV aa) ++ take i' (cellsV aa)
